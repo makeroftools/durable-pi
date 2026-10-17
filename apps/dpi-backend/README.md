@@ -33,6 +33,12 @@ With the repo's network config, `just net up local && just backend run` does the
 | `DPI_PROVIDER` | `openrouter` | `faux` gives a free deterministic model for tests |
 | `OPENROUTER_API_KEY` | | model access, required unless `DPI_PROVIDER=faux`. Without it the device lists no models. Never sent to clients |
 | `TYPESAFE_API_KEY` | | optional: `jev-damage-control` asks Jev with it, else through OpenRouter |
+| `DPI_SECRETS` | `off` | `openbao` loads the model credential from OpenBao at boot instead of `backend.env`; see [Model credentials from OpenBao](#model-credentials-from-openbao) |
+| `DPI_OPENBAO_ADDR` | `http://127.0.0.1:8200` | OpenBao address |
+| `DPI_OPENBAO_PATH` | `secret/data/pro/dpi/model` | the KV-v2 data path to read |
+| `DPI_OPENBAO_ROLE_ID_FILE` / `DPI_OPENBAO_SECRET_ID_FILE` | `~/.dpi/openbao-role-id` / `~/.dpi/openbao-secret-id` | AppRole credential files (0600), preferred |
+| `DPI_OPENBAO_TOKEN_FILE` | `~/.dpi/openbao.token` | token fallback when no AppRole files exist |
+| `DPI_OPENBAO_KEY_FIELD` / `DPI_OPENBAO_TYPESAFE_FIELD` | `openrouter_api_key` / `typesafe_api_key` | field names read from the path |
 | `DPI_SANDBOX` | `off` | `docker` runs each session's shell in a per-session container and confines its file tools to the roots; see [Execution sandbox](#execution-sandbox) |
 | `DPI_SANDBOX_IMAGE` | `node:24-slim` | the sandbox image; must have `bash` and whatever the project builds with |
 | `DPI_SANDBOX_NETWORK` | `none` | container network; `bridge` or `host` for work that reaches git or a package registry |
@@ -40,6 +46,30 @@ With the repo's network config, `just net up local && just backend run` does the
 | `DPI_SANDBOX_ROOTS` | | colon-separated extra host roots mounted **read-only** and readable by the file tools, beyond the session's own working directory |
 
 Flags `--port`, `--host`, `--name`, `--start-dirs`, `--data-dir` and `--env-file` override the env.
+
+## Model credentials from OpenBao
+
+Set `DPI_SECRETS=openbao` to load the model credential from OpenBao at boot instead of keeping it in
+`backend.env`. The backend authenticates with an AppRole (role-id + secret-id files), or a token file when no
+AppRole files exist, reads the KV-v2 path `secret/data/pro/dpi/model`, and holds the value in memory. It is
+never written to disk, logged, or returned to a client; a configured-but-unreachable OpenBao is a **startup
+failure**, never a silent empty key.
+
+```bash
+just openbao plan                 # show the policy, AppRole and the secret reference (read-only)
+just openbao apply --operator     # create the policy + AppRole, write role-id/secret-id (0600); operator-gated
+```
+
+Then in `~/.dpi/backend.env`:
+
+```
+DPI_SECRETS=openbao
+DPI_OPENBAO_ADDR=http://127.0.0.1:8200
+DPI_OPENBAO_PATH=secret/data/pro/dpi/model
+```
+
+The model value itself is written by the operator, never by this code or by an agent:
+`bao kv put secret/pro/dpi/model openrouter_api_key=<value>`.
 
 ## Execution sandbox
 

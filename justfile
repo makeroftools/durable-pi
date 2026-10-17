@@ -24,6 +24,9 @@ mod proactive 'just/proactive'
 # Execution sandbox: the boundary around agent commands and files
 mod sandbox 'just/sandbox'
 
+# OpenBao: the model-credential policy and AppRole
+mod openbao 'just/openbao'
+
 # List command groups
 default:
     @just --list
