@@ -10,6 +10,7 @@
     "test": "tsx --test tests/*.test.ts",
     "token": "tsx scripts/token.ts",
     "backup": "tsx scripts/backup.ts",
+    "service": "tsx scripts/service.ts",
     "migrate-playground": "tsx scripts/migrate-playground.ts"
   },
   "dependencies": {

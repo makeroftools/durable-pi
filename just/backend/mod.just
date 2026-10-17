@@ -39,6 +39,10 @@ backup-verify SRC:
 restore SRC DEST:
     npm run backup -- restore "{{ SRC }}" "{{ DEST }}"
 
+# Manage the local backend as a systemd user service (install|uninstall|start|stop|restart|status|logs|print)
+service *ARGS:
+    npm run service -- "$@"
+
 # Type check and run backend tests
 check:
     npm run check

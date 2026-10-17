@@ -19,6 +19,23 @@ npm start                      # 127.0.0.1:4780; data in ~/.dpi/backend
 
 With the repo's network config, `just net up local && just backend run` does the same thing. `just backend run` first stops whatever already listens on the backend's port.
 
+### Run it as a systemd user service
+
+On Linux, `just backend service install` writes `~/.config/systemd/user/dpi-backend.service` and starts it with
+`systemctl --user` — no sudo, restarts on failure, and starts at login. It reads the same `~/.dpi/backend.env` as
+`just backend run`.
+
+```bash
+just backend service install      # write the unit, enable it, start it
+just backend service status
+just backend service logs
+just backend service restart
+just backend service uninstall
+```
+
+Add `loginctl enable-linger $USER` to keep it running after you log out. Remote devices and `just net up local`
+use the system units in [`deploy/`](deploy/); this user unit is for a workstation.
+
 ## Configuration: `~/.dpi/backend.env`
 
 | Key | Default | Meaning |
