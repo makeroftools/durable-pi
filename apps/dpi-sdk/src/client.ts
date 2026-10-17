@@ -3,6 +3,8 @@ import type {
   AgentDetail,
   AgentExtensions,
   AgentSummary,
+  BatchLaunchItem,
+  BatchLaunchResult,
   CompactionSettings,
   CreateAgentBody,
   CreateSessionBody,
@@ -20,7 +22,9 @@ import type {
   WhenBusy,
   WireEntry,
 } from "./api.js";
+import { THINKING_LEVELS } from "./api.js";
 import { DpiError } from "./errors.js";
+import { canonicalJson, sha256Hex } from "./hash.js";
 import { readSse } from "./sse.js";
 
 export interface RequestOptions {
@@ -146,12 +150,95 @@ export class DpiClient {
   createSession(body: CreateSessionBody, idempotencyKey = newId()) {
     return this.request<LaunchResult>("POST", "/v1/sessions", body, { idempotencyKey });
   }
+  /**
+   * Launch one session per spec, in order, each under its own deterministic Idempotency-Key. The batch stops at
+   * the first failure, so calling it again with the same `batchKey` and specs converges: the sessions already
+   * created are re-admitted (the device replays the recorded launch) and only the rest start.
+   *
+   * `batchKey` names one act of launching. A retry must reuse it; a deliberate second run of the same specs
+   * must not, or it would replay the first run instead of starting new sessions.
+   */
+  async createSessions(
+    specs: readonly CreateSessionBody[],
+    batchKey: string,
+    options: BatchLaunchOptions = {},
+  ): Promise<BatchLaunchResult> {
+    const items = batchItems(specs, batchKey);
+    let failedAt: number | undefined;
+    for (const item of items) {
+      if (options.signal?.aborted) return { batchKey, items, aborted: true };
+      try {
+        item.result = await this.request<LaunchResult>("POST", "/v1/sessions", item.spec, {
+          idempotencyKey: item.idempotencyKey,
+          ...(options.signal ? { signal: options.signal } : {}),
+          ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+        });
+      } catch (cause) {
+        if (options.signal?.aborted) return { batchKey, items, aborted: true };
+        const error =
+          cause instanceof DpiError
+            ? cause
+            : new DpiError("internal", String((cause as Error)?.message ?? cause), 0, { cause });
+        item.error = { code: error.code, message: error.message };
+        failedAt = item.index;
+        options.onProgress?.(item);
+        break;
+      }
+      options.onProgress?.(item);
+    }
+    return { batchKey, items, ...(failedAt === undefined ? {} : { failedAt }) };
+  }
   session(ref: string) {
     return new SessionHandle(this, ref);
   }
   agent(session: string, agent: string | number) {
     return new AgentHandle(this, session, String(agent));
   }
+}
+
+export interface BatchLaunchOptions {
+  signal?: AbortSignal;
+  /** Per request; a launch opens a harness, so allow more than the default 20s on a slow device. */
+  timeoutMs?: number;
+  /** Called once per item, in order, after it settles (and for the item that stopped the batch). */
+  onProgress?: (item: BatchLaunchItem) => void;
+}
+
+/**
+ * The Idempotency-Key for one spec in a batch: SHA-256 over the batch key and the full spec, so the same act of
+ * launching always addresses the same session, whatever order the specs are sent in.
+ */
+export function launchKey(batchKey: string, spec: CreateSessionBody): string {
+  return `batch:${sha256Hex(canonicalJson({ batchKey, spec })).slice(0, 40)}`;
+}
+
+/** Validate every spec up front: a typo in the last one must not half-launch a batch. */
+function batchItems(specs: readonly CreateSessionBody[], batchKey: string): BatchLaunchItem[] {
+  if (typeof batchKey !== "string" || !batchKey.trim())
+    throw new DpiError("invalid", "A batchKey is required: it names one act of launching so a retry converges");
+  if (!Array.isArray(specs) || !specs.length)
+    throw new DpiError("invalid", "A batch needs at least one session");
+  const items: BatchLaunchItem[] = [];
+  const seen = new Map<string, number>();
+  specs.forEach((spec, index) => {
+    const at = `specs[${index}]`;
+    if (!spec || typeof spec !== "object") throw new DpiError("invalid", `${at} must be an object`);
+    if (typeof spec.name !== "string" || !spec.name.trim())
+      throw new DpiError("invalid", `${at}.name is required`);
+    if (typeof spec.cwd !== "string" || !spec.cwd.trim())
+      throw new DpiError("invalid", `${at}.cwd is required`);
+    if (typeof spec.model?.provider !== "string" || typeof spec.model?.modelId !== "string")
+      throw new DpiError("invalid", `${at}.model must be { provider, modelId }`);
+    if (spec.thinkingLevel !== undefined && !THINKING_LEVELS.includes(spec.thinkingLevel))
+      throw new DpiError("invalid", `${at}.thinkingLevel must be one of ${THINKING_LEVELS.join(", ")}`);
+    const idempotencyKey = launchKey(batchKey, spec);
+    const first = seen.get(idempotencyKey);
+    if (first !== undefined)
+      throw new DpiError("invalid", `${at} is identical to specs[${first}]; a batch launches each spec once`);
+    seen.set(idempotencyKey, index);
+    items.push({ index, spec, idempotencyKey });
+  });
+  return items;
 }
 
 export class SessionHandle {

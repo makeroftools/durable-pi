@@ -199,9 +199,14 @@ export class Store {
       CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,name TEXT NOT NULL,cwd TEXT NOT NULL,dbPath TEXT NOT NULL UNIQUE,createdAt INTEGER NOT NULL,model TEXT NOT NULL,provider TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS conversation_names(sessionId TEXT NOT NULL,conversationId INTEGER NOT NULL,name TEXT NOT NULL,PRIMARY KEY(sessionId,conversationId));
       CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS requests(key TEXT PRIMARY KEY,route TEXT NOT NULL,status INTEGER NOT NULL,body TEXT NOT NULL,createdAt INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS requests(key TEXT PRIMARY KEY,route TEXT NOT NULL,status INTEGER NOT NULL,body TEXT NOT NULL,createdAt INTEGER NOT NULL,bodyHash TEXT);
       CREATE TABLE IF NOT EXISTS session_spawns(key TEXT PRIMARY KEY,sessionId TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS session_compaction(sessionId TEXT PRIMARY KEY,settings TEXT NOT NULL);`);
+    // A catalog created before Idempotency-Keys were bound to their request body gains the column. Its existing
+    // rows keep a NULL hash: they are never replayed (see `replay`), because an unverifiable key is not a match.
+    const requestColumns = this.catalog.prepare("PRAGMA table_info(requests)").all() as { name: string }[];
+    if (!requestColumns.some((column) => column.name === "bodyHash"))
+      this.catalog.exec("ALTER TABLE requests ADD COLUMN bodyHash TEXT");
     const uid = this.catalog.prepare("SELECT value FROM meta WHERE key='device_uid'").get() as
       | { value: string }
       | undefined;
@@ -1210,19 +1215,26 @@ export class Store {
 
   // ------------------------------------------------------------ idempotency
 
-  replay(key: string, route: string) {
-    const row = this.catalog.prepare("SELECT * FROM requests WHERE key=?").get(key) as
-      | { route: string; status: number; body: string }
+  /**
+   * The recorded response for a repeated `Idempotency-Key`. A key is bound to the request it was first used with:
+   * the same route *and* the same body, canonically hashed so key order does not matter. Reusing a key for a
+   * different request is refused instead of answered with another request's result.
+   */
+  replay(key: string, route: string, bodyHash: string) {
+    const row = this.catalog.prepare("SELECT route,status,body,bodyHash FROM requests WHERE key=?").get(key) as
+      | { route: string; status: number; body: string; bodyHash: string | null }
       | undefined;
     if (!row) return undefined;
-    if (row.route !== route) throw invalid("Idempotency-Key was already used for a different request");
+    if (row.route !== route || row.bodyHash === null || row.bodyHash !== bodyHash)
+      throw new ApiFault("conflict", "Idempotency-Key was already used for a different request");
     return { status: row.status, body: JSON.parse(row.body) as unknown };
   }
 
-  remember(key: string, route: string, status: number, body: unknown) {
+  /** Only successful responses are remembered: a failed request may be retried under the same key. */
+  remember(key: string, route: string, status: number, body: unknown, bodyHash: string) {
     this.catalog
-      .prepare("INSERT OR IGNORE INTO requests VALUES(?,?,?,?,?)")
-      .run(key, route, status, JSON.stringify(body), Date.now());
+      .prepare("INSERT OR IGNORE INTO requests VALUES(?,?,?,?,?,?)")
+      .run(key, route, status, JSON.stringify(body), Date.now(), bodyHash);
   }
 
   // ------------------------------------------------------------ lifecycle

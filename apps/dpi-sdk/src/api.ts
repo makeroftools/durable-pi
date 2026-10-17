@@ -227,6 +227,30 @@ export interface LaunchResult extends SessionSummary {
   seedError?: string;
 }
 
+/**
+ * One launch in a batch. The key is a pure function of the batch key and the spec, so replaying the same
+ * batch (a retry after a failure) re-admits each item instead of starting a second session for it.
+ */
+export interface BatchLaunchItem {
+  index: number;
+  spec: CreateSessionBody;
+  idempotencyKey: string;
+  /** The session, when this item launched. A `seedError` inside it means the session exists but its brief did not land. */
+  result?: LaunchResult;
+  error?: { code: ErrorCode; message: string };
+}
+
+/** The outcome of a batch launch. Items stop at the first failure, so a retry converges. */
+export interface BatchLaunchResult {
+  batchKey: string;
+  /** Every spec, in order. An item the batch never reached has neither a result nor an error. */
+  items: BatchLaunchItem[];
+  /** Index of the first failed item; absent when the batch completed. */
+  failedAt?: number;
+  /** Set when the caller's signal was aborted mid-batch. */
+  aborted?: boolean;
+}
+
 export interface CreateAgentBody {
   from?: number | string;
   name?: string;
