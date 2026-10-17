@@ -42,6 +42,7 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { curatedModels, defaultModelId } from "./model-catalog.js";
 import { bindApiKey } from "./model-auth.js";
+import { migrateCatalog } from "./catalog-schema.js";
 import type { ModelCredentials } from "./secrets.js";
 import { fauxModels, installFaux } from "./faux.js";
 import {
@@ -204,18 +205,8 @@ export class Store {
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
     this.unlockCatalog = lockFile(`${this.catalogPath}.lock`);
     this.catalog = new DatabaseSync(this.catalogPath);
-    this.catalog.exec(`PRAGMA journal_mode=WAL;
-      CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,name TEXT NOT NULL,cwd TEXT NOT NULL,dbPath TEXT NOT NULL UNIQUE,createdAt INTEGER NOT NULL,model TEXT NOT NULL,provider TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS conversation_names(sessionId TEXT NOT NULL,conversationId INTEGER NOT NULL,name TEXT NOT NULL,PRIMARY KEY(sessionId,conversationId));
-      CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS requests(key TEXT PRIMARY KEY,route TEXT NOT NULL,status INTEGER NOT NULL,body TEXT NOT NULL,createdAt INTEGER NOT NULL,bodyHash TEXT);
-      CREATE TABLE IF NOT EXISTS session_spawns(key TEXT PRIMARY KEY,sessionId TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS session_compaction(sessionId TEXT PRIMARY KEY,settings TEXT NOT NULL);`);
-    // A catalog created before Idempotency-Keys were bound to their request body gains the column. Its existing
-    // rows keep a NULL hash: they are never replayed (see `replay`), because an unverifiable key is not a match.
-    const requestColumns = this.catalog.prepare("PRAGMA table_info(requests)").all() as { name: string }[];
-    if (!requestColumns.some((column) => column.name === "bodyHash"))
-      this.catalog.exec("ALTER TABLE requests ADD COLUMN bodyHash TEXT");
+    this.catalog.exec("PRAGMA journal_mode=WAL");
+    migrateCatalog(this.catalog);
     const uid = this.catalog.prepare("SELECT value FROM meta WHERE key='device_uid'").get() as
       | { value: string }
       | undefined;

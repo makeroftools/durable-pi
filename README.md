@@ -313,7 +313,7 @@ just proactive take        # reset and run the proactive demo
 
 | Check | Result |
 |---|---|
-| `just check`: SDK (23), backend (25 + 1 skipped), playground hub (1) + batch (6) and TUI (8) unit tests with strict types, the web build and lint, on the faux model | **pass** |
+| `just check`: SDK (23), backend (30 + 1 skipped), playground hub (1) + batch (6) and TUI (8) unit tests with strict types, the web build and lint, on the faux model | **pass** |
 | `just test ui`: 30 web checks against two faux devices, including batch launch, offline recovery, bad tokens, read only, extensions, durable jobs, the context bar, slash commands, keyboard and mobile | **30 of 30** |
 | `just test device` on a cloud VM with a real model: the web UI, steer, dedupe, subagents, jobs, compaction, reset, and quitting the browser mid-tool | **18 of 18** |
 | `just test e2e` on an ssh Mac: TUI and web on one run, steer from the web, both clients closed, device restarted mid-tool, fork, TUI reattach | **pass**: 9 tool results, 1 interrupted by the restart, each prompt admitted once |

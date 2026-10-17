@@ -91,7 +91,9 @@ test("a catalog from before body binding migrates and never replays an unverifia
   }
   const legacy = new DatabaseSync(catalogPath);
   try {
+    // Simulate a catalog written before versioning: no bodyHash column and no recorded schema_version.
     legacy.exec("ALTER TABLE requests DROP COLUMN bodyHash");
+    legacy.prepare("DELETE FROM meta WHERE key='schema_version'").run();
     legacy
       .prepare("INSERT INTO requests VALUES(?,?,?,?,?)")
       .run("ancient", "POST /v1/sessions", 201, '{"id":"a"}', Date.now());
