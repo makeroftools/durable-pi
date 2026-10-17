@@ -33,8 +33,46 @@ With the repo's network config, `just net up local && just backend run` does the
 | `DPI_PROVIDER` | `openrouter` | `faux` gives a free deterministic model for tests |
 | `OPENROUTER_API_KEY` | | model access, required unless `DPI_PROVIDER=faux`. Without it the device lists no models. Never sent to clients |
 | `TYPESAFE_API_KEY` | | optional: `jev-damage-control` asks Jev with it, else through OpenRouter |
+| `DPI_SANDBOX` | `off` | `docker` runs each session's shell in a per-session container and confines its file tools to the roots; see [Execution sandbox](#execution-sandbox) |
+| `DPI_SANDBOX_IMAGE` | `node:24-slim` | the sandbox image; must have `bash` and whatever the project builds with |
+| `DPI_SANDBOX_NETWORK` | `none` | container network; `bridge` or `host` for work that reaches git or a package registry |
+| `DPI_SANDBOX_CPUS` / `DPI_SANDBOX_MEMORY` / `DPI_SANDBOX_PIDS` | `2` / `2g` / `512` | container resource caps |
+| `DPI_SANDBOX_ROOTS` | | colon-separated extra host roots mounted **read-only** and readable by the file tools, beyond the session's own working directory |
 
 Flags `--port`, `--host`, `--name`, `--start-dirs`, `--data-dir` and `--env-file` override the env.
+
+## Execution sandbox
+
+By default an agent's `bash`, `read`, `write` and `edit` run on the host **as you, unsandboxed**. Set
+`DPI_SANDBOX=docker` to contain them: each session's shell runs in its own Docker container, and the file tools
+are refused any path whose real location (symlinks followed) is outside the session's working directory or a
+declared extra root.
+
+The durable harness, the SQLite databases and the orchestrator tools stay on the host, trusted — only the
+untrusted surface is contained. The container mounts the working directory read-write and any
+`DPI_SANDBOX_ROOTS` read-only; it drops all capabilities, runs with a read-only root filesystem and a writable
+`/tmp`, is resource-capped, and receives **no secrets**. Because only the shell is swapped, pi-durable's
+timeout, streaming and abort handling are unchanged.
+
+```bash
+# Enabling it for CBP worktrees on this host, in ~/.dpi/backend.env:
+DPI_SANDBOX=docker
+DPI_SANDBOX_IMAGE=node:24-slim
+DPI_SANDBOX_NETWORK=bridge
+DPI_SANDBOX_ROOTS=~/github/cbp/worktrees:~/cbp-worktrees
+```
+
+```bash
+just sandbox status   # the policy in force, and how to enable it
+just sandbox check    # run the real sandbox and verify containment (fails closed)
+```
+
+An image without `bash` or without the project's toolchain will not run the agent's commands; build one, or
+point `DPI_SANDBOX_IMAGE` at an image that has them. `DPI_SANDBOX_NETWORK=none` blocks all egress.
+
+**Known limits.** The path guard re-checks each call, so a symlink swapped between check and open is not
+defended against (TOCTOU). Killing a timed-out command stops the `docker exec` client; the in-container process
+may linger until the container is removed. Neither replaces running the device on a machine you already trust.
 
 ## Deploy to other devices
 

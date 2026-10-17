@@ -21,6 +21,9 @@ mod test 'just/test'
 # Proactive DPI demo: just proactive <command>
 mod proactive 'just/proactive'
 
+# Execution sandbox: the boundary around agent commands and files
+mod sandbox 'just/sandbox'
+
 # List command groups
 default:
     @just --list
