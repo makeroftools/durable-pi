@@ -89,6 +89,24 @@ DPI_OPENBAO_PATH=secret/data/pro/dpi/model
 The model value itself is written by the operator, never by this code or by an agent:
 `bao kv put secret/pro/dpi/model openrouter_api_key=<value>`.
 
+### A persistent vault
+
+`just openbao up` runs OpenBao with integrated **raft** storage in `~/.dpi/openbao-data` (bind-mounted and owned
+by you) and a config at `~/.dpi/openbao.hcl`. The container runs as your uid over plain HTTP on `127.0.0.1:8200`,
+so no root and no Docker volume owns the data. It is idempotent and never touches a vault it did not create.
+
+```bash
+just openbao up                # create or start the dpi-openbao container
+just openbao init --operator   # initialize, write ~/.dpi/openbao-init.json (0600, 3 of 5 keys), unseal, enable secret/ KV-v2
+just openbao status            # initialized/uninitialized, sealed/unsealed
+just openbao unseal            # after a host or container restart: unseal from the stored keys
+```
+
+A fresh vault starts **sealed** on every restart; `just openbao unseal` reads the unseal keys from
+`~/.dpi/openbao-init.json`. That file is the only thing that can unseal a restart, so keep a copy somewhere safe
+and offline. `DPI_OPENBAO_CONTAINER`, `DPI_OPENBAO_IMAGE` and `DPI_OPENBAO_ADDR` override the defaults. This
+replaces the dev-mode container used for evaluation: stop that one first so both do not bind port 8200.
+
 ## Execution sandbox
 
 By default an agent's `bash`, `read`, `write` and `edit` run on the host **as you, unsandboxed**. Set

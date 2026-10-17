@@ -17,3 +17,19 @@ plan:
 # Create the policy and AppRole (operator-gated: --operator; writes role-id/secret-id files 0600)
 apply *ARGS:
     npx tsx scripts/openbao-setup.ts apply --operator "$@"
+
+# Start (or restart) the persistent raft-storage OpenBao container
+up:
+    npx tsx scripts/openbao.ts up
+
+# Initialize a fresh vault; writes unseal material 0600 (operator-gated: --operator)
+init *ARGS:
+    npx tsx scripts/openbao.ts init --operator "$@"
+
+# Unseal a sealed vault using the stored unseal keys
+unseal:
+    npx tsx scripts/openbao.ts unseal
+
+# Show whether the container is initialized and sealed
+status:
+    npx tsx scripts/openbao.ts status
