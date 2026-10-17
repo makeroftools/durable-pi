@@ -17,6 +17,7 @@ const backendDir = resolve(app, "../dpi-backend");
 const tmp = mkdtempSync(join(tmpdir(), "dpi-net-ui-"));
 const work = join(tmp, "work");
 mkdirSync(join(work, "project-alpha"), { recursive: true });
+mkdirSync(join(work, "project-beta"), { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const token = () => randomBytes(24).toString("hex");
 const freePort = () =>
@@ -398,6 +399,9 @@ try {
   // Session tab usage; implementation details (storage paths) have no tab.
   await tab("Session");
   await expect(page.locator(".usage-breakdown")).toBeVisible();
+  await expect(page.locator(".metrics")).toContainText("agent tokens");
+  await expect(page.locator(".metrics")).toContainText("session tokens");
+  await expect(page.locator(".metrics")).toContainText("session cost");
   await expect(page.getByLabel("Thinking level")).toHaveValue("minimal");
   await expect(page.getByRole("tab", { name: "Storage" })).toHaveCount(0);
   pass("usage table, no storage tab");
@@ -507,6 +511,30 @@ try {
     timeout: 10000,
   });
   pass("archive session");
+
+  // Batch launch: one brief over several directories, sessions named from their basenames.
+  await page.getByRole("button", { name: "Batch launch", exact: true }).click();
+  await page.getByLabel("Device", { exact: true }).selectOption("box-b");
+  await page
+    .getByLabel("Directories, one per line")
+    .fill(`${join(work, "project-alpha")}\n${join(work, "project-beta")}`);
+  await expect(page.locator(".batch-item")).toHaveCount(2);
+  await page.getByRole("button", { name: "Launch 2 sessions" }).click();
+  await expect(page.locator(".batch-modal")).toHaveCount(0, { timeout: 30000 });
+  await expect(page.locator(".toast")).toContainText("2 sessions launched on box-b.");
+  await expect(page.locator(".tree-row.session").filter({ hasText: "project-alpha" })).toBeVisible();
+  await expect(page.locator(".tree-row.session").filter({ hasText: "project-beta" })).toBeVisible();
+  pass("batch launch: two directories in one act, named from their basenames");
+
+  // A repeated directory is flagged and not launched; only the first copy is pending.
+  await page.getByRole("button", { name: "Batch launch", exact: true }).click();
+  await page
+    .getByLabel("Directories, one per line")
+    .fill(`${join(work, "project-alpha")}\n${join(work, "project-alpha")}`);
+  await expect(page.locator(".batch-item.error")).toContainText("duplicate — not launched");
+  await expect(page.getByRole("button", { name: "Launch 1 session" })).toBeEnabled();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  pass("batch launch: a repeated directory is flagged, not silently deduped");
 
   expect(errors).toEqual([]);
   pass("no browser runtime errors");

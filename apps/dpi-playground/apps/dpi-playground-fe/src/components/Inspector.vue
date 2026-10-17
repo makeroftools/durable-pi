@@ -40,6 +40,7 @@ import {
   session,
   sessionHandle,
   sessionSummary,
+  sessionUsage,
   showInspector,
   tasks,
   ui,
@@ -276,17 +277,27 @@ const offeredTools = computed(() => detail.value?.tools.filter((t) => t.offered)
             <section class="stats-section" aria-labelledby="stats-title">
               <div class="section-label"><span id="stats-title">STATS</span></div>
               <div class="metrics">
-                <div :title="`${usage.tokens.toLocaleString('en-US')} total tokens`">
+                <div :title="`${usage.tokens.toLocaleString('en-US')} tokens from this agent`">
                   <span>{{ number(usage.tokens) }}</span
-                  ><small>total tokens</small>
+                  ><small>agent tokens</small>
                 </div>
-                <div>
+                <div :title="`$${usage.cost.toFixed(4)} from this agent`">
                   <span>${{ usage.cost.toFixed(4) }}</span
                   ><small>agent cost</small>
                 </div>
                 <div>
                   <span>{{ detail?.tools.length ?? 0 }}</span
                   ><small>tools</small>
+                </div>
+                <div
+                  :title="`${sessionUsage.tokens.toLocaleString('en-US')} tokens across every agent in this session`"
+                >
+                  <span>{{ number(sessionUsage.tokens) }}</span
+                  ><small>session tokens</small>
+                </div>
+                <div :title="`$${sessionUsage.cost.toFixed(4)} across every agent in this session`">
+                  <span>${{ sessionUsage.cost.toFixed(4) }}</span
+                  ><small>session cost</small>
                 </div>
               </div>
               <table class="usage-breakdown" aria-label="Agent token and cost breakdown">

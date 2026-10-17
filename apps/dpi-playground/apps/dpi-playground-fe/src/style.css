@@ -375,6 +375,7 @@ svg {
 .metrics {
   display: grid;
   grid-template-columns: 1fr 1.3fr 0.5fr;
+  row-gap: 18px;
   margin-top: 21px;
 }
 .metrics > div {

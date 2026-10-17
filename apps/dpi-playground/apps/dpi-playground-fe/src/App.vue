@@ -4,6 +4,7 @@ import {
   Check,
   CircleHelp,
   Info,
+  Layers,
   Network,
   PanelLeft,
   PanelRight,
@@ -18,6 +19,7 @@ import AgentView from "./components/AgentView.vue";
 import Inspector from "./components/Inspector.vue";
 import OfflinePanel from "./components/OfflinePanel.vue";
 import NewSessionDialog from "./components/NewSessionDialog.vue";
+import BatchLaunchDialog from "./components/BatchLaunchDialog.vue";
 import PromptDialog from "./components/PromptDialog.vue";
 import ModelPicker from "./components/ModelPicker.vue";
 import {
@@ -64,6 +66,10 @@ async function newAgent() {
 
 function openNewSession() {
   ui.dialog = { kind: "new-session", deviceId: selected.value?.deviceId };
+}
+
+function openBatchLaunch() {
+  ui.dialog = { kind: "batch-launch", deviceId: selected.value?.deviceId };
 }
 
 function keydown(e: KeyboardEvent) {
@@ -152,6 +158,9 @@ onBeforeUnmount(() => {
         <button class="primary small" @click="openNewSession">
           <Plus :size="18" />New session
         </button>
+        <button class="secondary small" @click="openBatchLaunch">
+          <Layers :size="18" />Batch launch
+        </button>
         <button
           class="icon-button inspector-toggle"
           aria-label="Toggle inspector"
@@ -204,6 +213,11 @@ onBeforeUnmount(() => {
 
     <NewSessionDialog
       v-if="ui.dialog?.kind === 'new-session'"
+      :device-id="ui.dialog.deviceId"
+      @close="ui.dialog = undefined"
+    />
+    <BatchLaunchDialog
+      v-else-if="ui.dialog?.kind === 'batch-launch'"
       :device-id="ui.dialog.deviceId"
       @close="ui.dialog = undefined"
     />

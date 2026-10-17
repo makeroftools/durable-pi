@@ -425,6 +425,68 @@
 .session-modal {
   width: 1120px;
 }
+.batch-modal {
+  width: 1180px;
+}
+.batch-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 26px;
+}
+.batch-picker .field {
+  margin-top: 20px;
+}
+.add-folder {
+  align-self: flex-start;
+}
+.batch-list {
+  list-style: none;
+  margin: 22px 0 0;
+  padding: 4px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #161011;
+}
+.batch-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.batch-item + .batch-item {
+  border-top: 1px solid var(--line);
+}
+.batch-item code {
+  flex: 1;
+  min-width: 0;
+  font-family: "IBM Plex Mono", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e9e2e2;
+}
+.batch-item span {
+  flex: none;
+  color: var(--muted);
+  text-align: right;
+}
+.batch-item.error span {
+  color: #ff8997;
+}
+.batch-item.warn span {
+  color: #f0c674;
+}
+.batch-item.ok span {
+  color: #6fcf97;
+}
+.batch-item.pending span {
+  color: var(--secondary);
+}
 .device-modal code,
 .session-modal code {
   overflow-wrap: anywhere;

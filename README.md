@@ -182,7 +182,7 @@ Fork any agent at any entry, from the transcript or with `/fork`. The fork copie
   <img src="images/15_web_client.png" alt="The web client: the network tree with five devices, the inspector's Session tab with the context bar, and an agent's transcript on a cloud VM" width="800">
 </p>
 
-The web client has three columns: the **network tree** (device → session → agent), the **inspector** and the **agent**. The inspector tabs are Session (model, thinking, context bar, usage), State, Tasks, Tools and Extend. The composer sends a follow-up, a steer (it joins after the current tool round) or a reject-if-busy, and `/` opens the slash commands. The browser never sees a token. It holds one SSE connection to the hub, and the hub opens the authenticated upstreams.
+The web client has three columns: the **network tree** (device → session → agent), the **inspector** and the **agent**. The inspector tabs are Session (model, thinking, context bar, usage — the open agent and the session total), State, Tasks, Tools and Extend. The composer sends a follow-up, a steer (it joins after the current tool round) or a reject-if-busy, and `/` opens the slash commands. **Batch launch** takes a list of directories and starts one session per directory in a single act under one brief; the act's idempotency keys are content-addressed, so a retry after a partial failure re-admits the sessions it already made instead of starting them again. The browser never sees a token. It holds one SSE connection to the hub, and the hub opens the authenticated upstreams.
 
 <p align="center">
   <img src="images/16_terminal_client.svg" alt="dpi-tui attached to vm-1:release-notes: the device, workspace and agent header, write and bash tool rows with results, and the model, context and cost footer" width="780">
@@ -313,8 +313,8 @@ just proactive take        # reset and run the proactive demo
 
 | Check | Result |
 |---|---|
-| `just check`: SDK (14), backend (10), hub (1) and TUI (8) unit tests with strict types, the web build and lint, on the faux model | **pass** |
-| `just test ui`: 28 web checks against two faux devices, including offline recovery, bad tokens, read only, extensions, durable jobs, the context bar, slash commands, keyboard and mobile | **28 of 28** |
+| `just check`: SDK (23), backend (19 + 1 skipped), playground hub (1) + batch (6) and TUI (8) unit tests with strict types, the web build and lint, on the faux model | **pass** |
+| `just test ui`: 30 web checks against two faux devices, including batch launch, offline recovery, bad tokens, read only, extensions, durable jobs, the context bar, slash commands, keyboard and mobile | **30 of 30** |
 | `just test device` on a cloud VM with a real model: the web UI, steer, dedupe, subagents, jobs, compaction, reset, and quitting the browser mid-tool | **18 of 18** |
 | `just test e2e` on an ssh Mac: TUI and web on one run, steer from the web, both clients closed, device restarted mid-tool, fork, TUI reattach | **pass**: 9 tool results, 1 interrupted by the restart, each prompt admitted once |
 | `just test smoke faux`: TUI streaming, steer, Esc, fork, exit and reattach by name | **pass** |

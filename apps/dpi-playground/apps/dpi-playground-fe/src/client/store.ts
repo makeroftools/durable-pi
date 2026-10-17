@@ -211,6 +211,8 @@ export const busy = computed(
     tasks.value.some((t) => !t.effectiveBackground && t.conversationId === selected.value?.agentId),
 );
 export const usage = computed(() => sumUsage(agentState.value.usage));
+/** The selected session's total, across its root agent, forks and subagents. */
+export const sessionUsage = computed(() => sumUsage(session.state.value.usage));
 export const currentModel = computed(() => {
   const m = agentState.value.agent.model;
   return models.value.find((x) => x.provider === m?.provider && x.id === m?.modelId);
@@ -247,6 +249,7 @@ export const ui = reactive({
 
 export type Dialog =
   | { kind: "new-session"; deviceId?: string }
+  | { kind: "batch-launch"; deviceId?: string }
   | { kind: "models" }
   | { kind: "help" }
   | { kind: "path"; path: string }
