@@ -149,6 +149,11 @@ const decodeCursor = (cursor?: string) => {
   }
 };
 
+/** How long a successful response is remembered for replay. A retry older than this is a new act, not a replay. */
+const REQUEST_TTL_MS = 24 * 3600_000;
+/** How often a running device prunes the replay cache, so the contract holds without a restart. */
+const REQUEST_PRUNE_MS = 3600_000;
+
 export class Store {
   readonly models = createModels();
   readonly opened = new Map<string, Opened>();
@@ -165,6 +170,8 @@ export class Store {
   private compactions = new Map<string, Partial<CompactionSettings> | null>();
   /** Task labels never change once known: tool names of pi.tool tasks, job titles of job runs. */
   private taskLabels = new Map<string, { label?: string; callId?: string }>();
+  /** Prunes the replay cache while the device runs; unref'd so it never holds the process open. */
+  private pruneTimer?: NodeJS.Timeout;
 
   get catalogPath() {
     return join(this.options.dataDir, "catalog.sqlite");
@@ -212,7 +219,15 @@ export class Store {
       | undefined;
     this.uid = uid?.value ?? randomUUID();
     if (!uid) this.catalog.prepare("INSERT INTO meta(key,value) VALUES('device_uid',?)").run(this.uid);
-    this.catalog.prepare("DELETE FROM requests WHERE createdAt < ?").run(Date.now() - 24 * 3600_000);
+    this.pruneRequests();
+    this.pruneTimer = setInterval(() => {
+      try {
+        this.pruneRequests();
+      } catch {
+        // A failed prune is retried on the next tick; it must never take the device down.
+      }
+    }, REQUEST_PRUNE_MS);
+    this.pruneTimer.unref();
   }
 
   static async open(options: StoreOptions) {
@@ -1237,9 +1252,19 @@ export class Store {
       .run(key, route, status, JSON.stringify(body), Date.now(), bodyHash);
   }
 
+  /**
+   * Forget responses older than the TTL and return how many were removed. Running this while the device is up keeps
+   * the catalog bounded and makes a stale retry a new act instead of a replay, matching the promise made at open.
+   */
+  pruneRequests(now = Date.now()): number {
+    const result = this.catalog.prepare("DELETE FROM requests WHERE createdAt < ?").run(now - REQUEST_TTL_MS);
+    return Number(result.changes);
+  }
+
   // ------------------------------------------------------------ lifecycle
 
   async close() {
+    if (this.pruneTimer) clearInterval(this.pruneTimer);
     for (const { harness, unlock, unsubscribe } of this.opened.values()) {
       unsubscribe();
       try {

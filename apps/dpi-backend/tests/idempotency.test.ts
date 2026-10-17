@@ -119,6 +119,30 @@ test("a catalog from before body binding migrates and never replays an unverifia
   }
 });
 
+// The replay cache is a 24 h cache, not a permanent log: a running device must forget old keys too, or it both
+// grows without bound and replays a retry that is older than the promise.
+test("the replay cache is pruned by age while the device runs", async () => {
+  const t = await tempStore();
+  const store = await t.open();
+  try {
+    store.remember("fresh", "POST /v1/sessions", 201, { id: "f" }, "hash-f");
+    assert.deepEqual(store.replay("fresh", "POST /v1/sessions", "hash-f"), { status: 201, body: { id: "f" } });
+
+    // Past the TTL the key is forgotten, so a stale retry is a new act rather than a replay.
+    store.catalog.prepare("UPDATE requests SET createdAt=? WHERE key=?").run(Date.now() - 25 * 3600_000, "fresh");
+    assert.equal(store.pruneRequests(), 1);
+    assert.equal(store.replay("fresh", "POST /v1/sessions", "hash-f"), undefined);
+
+    // Inside the TTL the response survives.
+    store.remember("kept", "POST /v1/sessions", 201, { id: "k" }, "hash-k");
+    assert.equal(store.pruneRequests(), 0);
+    assert.deepEqual(store.replay("kept", "POST /v1/sessions", "hash-k"), { status: 201, body: { id: "k" } });
+  } finally {
+    await store.close();
+    await t.cleanup();
+  }
+});
+
 // The batch launch is the operator's "one brief, N worktrees" act. It must be safe to retry as a whole: a
 // session that already exists is re-admitted, never duplicated, and the batch stops at the first failure.
 test("batch launch: one session per spec, and a retry after a failure converges", async () => {
