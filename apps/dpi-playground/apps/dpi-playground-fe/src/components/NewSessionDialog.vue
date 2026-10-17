@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { Plus, X } from "lucide-vue-next";
+import { THINKING_LEVELS, type ThinkingLevel } from "@sdk/api";
 import DirBrowser from "./DirBrowser.vue";
 import { deviceClient, message } from "../client/hub";
 import { network, notify, select } from "../client/store";
@@ -15,7 +16,7 @@ const deviceId = ref(
 const device = computed(() => devices.value.find((d) => d.id === deviceId.value));
 const models = computed(() => device.value?.info?.models ?? []);
 const key = (m: { provider: string; id: string }) => `${m.provider}/${m.id}`;
-const draft = ref({ name: "", cwd: "", model: "" });
+const draft = ref({ name: "", cwd: "", model: "", prompt: "", thinking: "" });
 const pending = ref(false);
 const error = ref("");
 
@@ -41,6 +42,8 @@ async function create() {
       name: draft.value.name.trim() || "New session",
       cwd: draft.value.cwd.trim(),
       model: { provider: model.provider, modelId: model.id },
+      ...(draft.value.prompt.trim() ? { prompt: draft.value.prompt.trim() } : {}),
+      ...(draft.value.thinking ? { thinkingLevel: draft.value.thinking as ThinkingLevel } : {}),
     });
     const root = created.agents.find((a) => a.kind === "root") ?? created.agents[0];
     select({ deviceId: device.value.id, sessionId: created.id, agentId: root?.id ?? 1 });
@@ -100,6 +103,18 @@ async function create() {
             </option>
           </select></label
         >
+        <label
+          >Thinking<select v-model="draft.thinking" aria-label="New session thinking level">
+            <option value="">Default</option>
+            <option v-for="level in THINKING_LEVELS" :key="level" :value="level">{{ level }}</option>
+          </select></label
+        >
+        <label
+          >Opening brief (optional)<textarea
+            v-model="draft.prompt"
+            rows="4"
+            placeholder="Paste a brief, or a path to one. Sent as the session's first message."
+        /></label>
       </template>
       <p v-if="error" class="message-error" role="alert">{{ error }}</p>
       <footer>

@@ -6,6 +6,7 @@ import type {
   CompactionSettings,
   CreateAgentBody,
   CreateSessionBody,
+  LaunchResult,
   DeviceInfo,
   DeviceTree,
   DirListing,
@@ -143,7 +144,7 @@ export class DpiClient {
     return this.request<SessionSummary[]>("GET", "/v1/sessions");
   }
   createSession(body: CreateSessionBody, idempotencyKey = newId()) {
-    return this.request<SessionSummary>("POST", "/v1/sessions", body, { idempotencyKey });
+    return this.request<LaunchResult>("POST", "/v1/sessions", body, { idempotencyKey });
   }
   session(ref: string) {
     return new SessionHandle(this, ref);

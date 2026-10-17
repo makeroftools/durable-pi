@@ -213,6 +213,18 @@ export interface CreateSessionBody {
   cwd: string;
   model: { provider: string; modelId: string };
   thinkingLevel?: ThinkingLevel;
+  /** An opening brief, submitted to the root agent as its first message. */
+  prompt?: string;
+  /** Agent instructions applied before the opening brief. */
+  instructions?: string;
+}
+
+/** The result of a seeded launch: the session, plus how its opening brief and instructions were admitted. */
+export interface LaunchResult extends SessionSummary {
+  /** The submission carrying the opening brief, when one was provided and admitted. */
+  prompt?: { submissionId: number };
+  /** Set when the session was created but seeding failed; the session is valid and the failure is explicit. */
+  seedError?: string;
 }
 
 export interface CreateAgentBody {

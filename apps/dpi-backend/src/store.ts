@@ -6,6 +6,7 @@ import type {
   AgentRef,
   AgentSummary,
   CreateSessionBody,
+  LaunchResult,
   DeviceInfo,
   DeviceTree,
   DirListing,
@@ -431,6 +432,29 @@ export class Store {
     }
     this.notify();
     return this.sessionSummary(row);
+  }
+
+  /**
+   * Create a session and, optionally, seed it in one act: apply the agent instructions, then submit the opening
+   * brief to the root agent under a deterministic requestId. Two independent guards make a retry safe: the route's
+   * Idempotency-Key replays the recorded response, and the requestId makes a repeated brief a no-op even without
+   * it. A seeding failure never discards the session; it is reported in `seedError`, never swallowed.
+   */
+  async createSeeded(body: CreateSessionBody): Promise<LaunchResult> {
+    const session = await this.create(body);
+    const result: LaunchResult = { ...session };
+    try {
+      const { row, c } = await this.resolveAgent(session.id, "main");
+      if (typeof body.instructions === "string" && body.instructions.trim())
+        await this.configure(row, c, { instructions: body.instructions });
+      if (typeof body.prompt === "string" && body.prompt.trim()) {
+        const submission = await this.send(c, { content: body.prompt, requestId: `launch:${session.id}:prompt` });
+        result.prompt = { submissionId: submission.id as number };
+      }
+    } catch (e) {
+      result.seedError = (e as Error).message;
+    }
+    return result;
   }
 
   /**

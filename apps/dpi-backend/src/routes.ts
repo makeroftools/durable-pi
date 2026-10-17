@@ -70,7 +70,7 @@ export function v1(store: Store) {
 
   // ---------------------------------------------------------- sessions
   r.get("/sessions", route(async (_req, res) => res.json((await store.tree()).sessions)));
-  r.post("/sessions", create, route(async (req, res) => res.status(201).json(await store.create(req.body ?? {}))));
+  r.post("/sessions", create, route(async (req, res) => res.status(201).json(await store.createSeeded(req.body ?? {}))));
   r.get("/sessions/:s", route(async (_req, res) => res.json(await store.sessionSummary(L(res).row))));
   r.patch("/sessions/:s", route(async (req, res) => res.json(await store.rename(L(res).row, req.body?.name))));
   r.get("/sessions/:s/compaction", route(async (_req, res) => res.json(store.compactionOf(L(res).row.id))));
