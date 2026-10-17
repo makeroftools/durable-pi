@@ -57,6 +57,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
+import { SandboxExecutionEnv, SANDBOX_SHELL, sandboxShellEnv, type SandboxSettings } from "./sandbox.js";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createPlayground, Workspace, type SpawnSession } from "./extensions.js";
 import { createJobs, JobRuns, JOB_DEFS, jobDef, resolveJobInput, type Jobs } from "./jobs.js";
@@ -92,6 +93,8 @@ export interface StoreOptions {
   startDirs: string[];
   name: string;
   provider: "openrouter" | "faux";
+  /** Per-session execution sandbox. Off when absent, so the host environment is unchanged. */
+  sandbox?: SandboxSettings;
 }
 
 /** Agent documents a client may read or stream, by kind. */
@@ -262,6 +265,35 @@ export class Store {
       capabilities: ["events", "docs", "demo", "jobs"],
       jobs: JOB_DEFS,
     };
+  }
+
+  /**
+   * The execution environment for one session. Sandboxed when configured: the shell runs in a per-session
+   * container that mounts only the declared roots, and the filesystem tools are confined to those roots. With
+   * sandboxing off this is the plain host environment, exactly as before.
+   */
+  private execEnv(row: SessionRow, cwd: string, shellEnv: NodeJS.ProcessEnv) {
+    const sandbox = this.options.sandbox;
+    if (!sandbox?.enabled) return new NodeExecutionEnv({ cwd, shellEnv });
+    const container = `dpi-sbx-${row.id}`;
+    const roots = [cwd, ...sandbox.extraRoots];
+    return new SandboxExecutionEnv({
+      cwd,
+      roots,
+      shellPath: SANDBOX_SHELL,
+      container,
+      shellEnv: sandboxShellEnv({
+        container,
+        image: sandbox.image,
+        cwd,
+        roots,
+        network: sandbox.network,
+        cpus: sandbox.cpus,
+        memory: sandbox.memory,
+        pids: sandbox.pids,
+        base: shellEnv,
+      }),
+    });
   }
 
   private defaultModel() {
@@ -541,7 +573,7 @@ export class Store {
         {
           models: this.models,
           registry,
-          env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? row.cwd, shellEnv }),
+          env: ({ cwd }) => this.execEnv(row, cwd ?? row.cwd, shellEnv),
           conversationCreated: async (tx, c) => {
             await tx.doc(Workspace, c.id);
             await tx.doc(JobRuns, c.id);
