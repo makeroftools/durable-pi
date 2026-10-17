@@ -18,6 +18,7 @@ const tmp = mkdtempSync(join(tmpdir(), "dpi-net-ui-"));
 const work = join(tmp, "work");
 mkdirSync(join(work, "project-alpha"), { recursive: true });
 mkdirSync(join(work, "project-beta"), { recursive: true });
+mkdirSync(join(work, "project-delta"), { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const token = () => randomBytes(24).toString("hex");
 const freePort = () =>
@@ -535,6 +536,25 @@ try {
   await expect(page.getByRole("button", { name: "Launch 1 session" })).toBeEnabled();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   pass("batch launch: a repeated directory is flagged, not silently deduped");
+
+  // A partial failure keeps the dialog open; retry narrows to the directory that failed, so the one that launched
+  // is not sent a second time under the same act.
+  const gamma = join(work, "project-gamma");
+  await page.getByRole("button", { name: "Batch launch", exact: true }).click();
+  await page.getByLabel("Device", { exact: true }).selectOption("box-b");
+  await page.getByLabel("Directories, one per line").fill(`${join(work, "project-delta")}\n${gamma}`);
+  await page.getByRole("button", { name: "Launch 2 sessions" }).click();
+  await expect(page.locator(".batch-modal")).toBeVisible({ timeout: 30000 });
+  await expect(page.locator(".batch-item.ok")).toContainText("Launched as");
+  await expect(page.locator(".batch-item.error")).toContainText("existing folder");
+  await expect(page.getByRole("button", { name: "Retry remaining (1)" })).toBeEnabled();
+  // The missing directory now exists; the retry sends only it.
+  mkdirSync(gamma, { recursive: true });
+  await page.getByRole("button", { name: "Retry remaining (1)" }).click();
+  await expect(page.locator(".batch-modal")).toHaveCount(0, { timeout: 30000 });
+  await expect(page.locator(".tree-row.session").filter({ hasText: "project-delta" })).toBeVisible();
+  await expect(page.locator(".tree-row.session").filter({ hasText: "project-gamma" })).toBeVisible();
+  pass("batch launch: partial failure stays open, retry narrows to the failed directory");
 
   expect(errors).toEqual([]);
   pass("no browser runtime errors");
