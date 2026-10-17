@@ -3,17 +3,20 @@ import express from "express";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 import { loadConfig } from "./config.js";
-import { applySecrets } from "./secrets.js";
+import { fetchOpenBaoSecrets, secretFields, type ModelCredentials } from "./secrets.js";
 import { Store } from "./store.js";
 import { bearerAuth } from "./auth.js";
 import { errorMiddleware } from "./errors.js";
 import { v1 } from "./routes.js";
 
 const config = loadConfig();
-// Load the model credential from OpenBao at boot when configured; a failure is fatal, never a silent empty key.
+// Resolve the model credential from OpenBao at boot when configured; a failure is fatal, never a silent empty key.
+// The value is passed to the store and the Jev client in memory — it is never placed in `process.env`.
+let secrets: ModelCredentials | undefined;
 if (config.secrets.enabled && config.provider !== "faux") {
-  const applied = await applySecrets(config.secrets);
-  console.log(`secrets: ${applied.fields.join(", ")} from OpenBao (${applied.via})`);
+  const resolved = await fetchOpenBaoSecrets(config.secrets);
+  secrets = { openrouterApiKey: resolved.openrouterApiKey, typesafeApiKey: resolved.typesafeApiKey };
+  console.log(`secrets: ${secretFields(resolved).join(", ")} from OpenBao (${resolved.via})`);
 }
 const store = await Store.open({
   dataDir: config.dataDir,
@@ -21,6 +24,7 @@ const store = await Store.open({
   name: config.name,
   provider: config.provider,
   sandbox: config.sandbox,
+  secrets,
 });
 
 const app = express();

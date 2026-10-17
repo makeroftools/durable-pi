@@ -1,9 +1,10 @@
 // Model credentials from OpenBao, resolved at boot and held only in memory.
 //
-// When DPI_SECRETS=openbao the backend authenticates to OpenBao (AppRole preferred, else a token file), reads
-// the model credential from a KV-v2 path, and places it in the process environment for the provider. The value
-// is never written to backend.env, never logged, and never returned to a client. If OpenBao is configured but
-// cannot be reached or authorised, the caller fails closed rather than starting without a key.
+// When DPI_SECRETS=openbao the backend authenticates to OpenBao (AppRole preferred, else a token file) and reads
+// the model credential from a KV-v2 path. The value is handed to the provider and the Jev client directly — it is
+// never placed in `process.env`, never written to backend.env, never logged, and never returned to a client. If
+// OpenBao is configured but cannot be reached or authorised, the caller fails closed rather than starting without
+// a key.
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -50,7 +51,8 @@ export function secretsSettings(env: NodeJS.ProcessEnv = process.env): SecretsSe
   };
 }
 
-export type ResolvedSecrets = { openrouterApiKey?: string; typesafeApiKey?: string; via: "approle" | "token" };
+export type ModelCredentials = { openrouterApiKey?: string; typesafeApiKey?: string };
+export type ResolvedSecrets = ModelCredentials & { via: "approle" | "token" };
 
 async function readIfPresent(path: string): Promise<string | undefined> {
   try {
@@ -107,22 +109,12 @@ export async function fetchOpenBaoSecrets(settings: SecretsSettings): Promise<Re
 }
 
 /**
- * Resolve the model credentials and place them in the process environment, replacing any plaintext value.
- * Returns which fields were set — the names only, never the values.
+ * The credential field names that resolved, for a boot log line — never the values, and never the OpenBao field
+ * names, so a log does not reveal how the vault is laid out.
  */
-export async function applySecrets(
-  settings: SecretsSettings,
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<{ via: "approle" | "token"; fields: string[] }> {
-  const secrets = await fetchOpenBaoSecrets(settings);
-  const fields: string[] = [];
-  if (secrets.openrouterApiKey) {
-    env.OPENROUTER_API_KEY = secrets.openrouterApiKey;
-    fields.push("OPENROUTER_API_KEY");
-  }
-  if (secrets.typesafeApiKey) {
-    env.TYPESAFE_API_KEY = secrets.typesafeApiKey;
-    fields.push("TYPESAFE_API_KEY");
-  }
-  return { via: secrets.via, fields };
+export function secretFields(secrets: ModelCredentials): string[] {
+  return [
+    ...(secrets.openrouterApiKey ? ["OPENROUTER_API_KEY"] : []),
+    ...(secrets.typesafeApiKey ? ["TYPESAFE_API_KEY"] : []),
+  ];
 }

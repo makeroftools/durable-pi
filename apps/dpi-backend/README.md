@@ -31,8 +31,8 @@ With the repo's network config, `just net up local && just backend run` does the
 | `DPI_HOME` | `~/.dpi` | where `backend.env` is read (set by the service unit) |
 | `DPI_ENV_FILE` | `$DPI_HOME/backend.env` | the env file to read |
 | `DPI_PROVIDER` | `openrouter` | `faux` gives a free deterministic model for tests |
-| `OPENROUTER_API_KEY` | | model access, required unless `DPI_PROVIDER=faux`. Without it the device lists no models. Never sent to clients |
-| `TYPESAFE_API_KEY` | | optional: `jev-damage-control` asks Jev with it, else through OpenRouter |
+| `OPENROUTER_API_KEY` | | model access when not using OpenBao, required unless `DPI_PROVIDER=faux`. Without it the device lists no models. Never sent to clients |
+| `TYPESAFE_API_KEY` | | optional: `jev-damage-control` asks Jev with it, else through OpenRouter. Only read when not using OpenBao |
 | `DPI_SECRETS` | `off` | `openbao` loads the model credential from OpenBao at boot instead of `backend.env`; see [Model credentials from OpenBao](#model-credentials-from-openbao) |
 | `DPI_OPENBAO_ADDR` | `http://127.0.0.1:8200` | OpenBao address |
 | `DPI_OPENBAO_PATH` | `secret/data/pro/dpi/model` | the KV-v2 data path to read |
@@ -52,8 +52,9 @@ Flags `--port`, `--host`, `--name`, `--start-dirs`, `--data-dir` and `--env-file
 Set `DPI_SECRETS=openbao` to load the model credential from OpenBao at boot instead of keeping it in
 `backend.env`. The backend authenticates with an AppRole (role-id + secret-id files), or a token file when no
 AppRole files exist, reads the KV-v2 path `secret/data/pro/dpi/model`, and holds the value in memory. It is
-never written to disk, logged, or returned to a client; a configured-but-unreachable OpenBao is a **startup
-failure**, never a silent empty key.
+handed straight to the model provider and to the Jev client — it never enters `process.env`, so it cannot leak
+into an agent's `bash` even when the execution sandbox is off. It is never written to disk, logged, or returned
+to a client; a configured-but-unreachable OpenBao is a **startup failure**, never a silent empty key.
 
 ```bash
 just openbao plan                 # show the policy, AppRole and the secret reference (read-only)

@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { defineDoc, defineExtension, hook, section, ToolTask, type Extension } from "@earendil-works/pi-durable";
 import type { HarnessExtensionInfo } from "../../dpi-sdk/src/api.js";
 import { askJev, type JevAnswer, type JevQuestion } from "./jev.js";
+import type { ModelCredentials } from "./secrets.js";
 
 const PROMPTS_DIR = join(import.meta.dirname, "../prompts");
 
@@ -95,7 +96,7 @@ export const ADDON_INFO: Omit<HarnessExtensionInfo, "enabled" | "prompts">[] = [
   },
 ];
 
-export function createAddons(opts: { offline: boolean }) {
+export function createAddons(opts: { offline: boolean; credentials?: ModelCredentials }) {
   const prompts = defineExtension({
     name: "system-prompts",
     sections: [
@@ -111,7 +112,9 @@ export function createAddons(opts: { offline: boolean }) {
       ),
     ],
   });
-  const judge = opts.offline ? judgeOffline : async (command: string) => gate(await askJev({ command }, BASH_QUESTIONS));
+  const judge = opts.offline
+    ? judgeOffline
+    : async (command: string) => gate(await askJev({ command }, BASH_QUESTIONS, { credentials: opts.credentials }));
   const jev = defineExtension({
     name: "jev-damage-control",
     hooks: [

@@ -41,6 +41,8 @@ import { BACKGROUND_CONTEXT as ctx, withAbortSignal } from "@earendil-works/chor
 import { createModels } from "@earendil-works/pi-ai/models";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { curatedModels, defaultModelId } from "./model-catalog.js";
+import { bindApiKey } from "./model-auth.js";
+import type { ModelCredentials } from "./secrets.js";
 import { fauxModels, installFaux } from "./faux.js";
 import {
   Harness,
@@ -95,6 +97,8 @@ export interface StoreOptions {
   provider: "openrouter" | "faux";
   /** Per-session execution sandbox. Off when absent, so the host environment is unchanged. */
   sandbox?: SandboxSettings;
+  /** Model credentials resolved from OpenBao at boot, held in memory and never placed in `process.env`. */
+  secrets?: ModelCredentials;
 }
 
 /** Agent documents a client may read or stream, by kind. */
@@ -187,10 +191,15 @@ export class Store {
       const catalog = provider.getModels();
       for (const model of curatedModels)
         if (!catalog.some((m) => m.id === model.id)) throw Error(`OpenRouter catalog missing ${model.id}`);
-      this.models.setProvider({
-        ...provider,
-        getModels: () => catalog.filter((m) => curatedModels.some((c) => c.id === m.id)),
-      });
+      this.models.setProvider(
+        bindApiKey(
+          {
+            ...provider,
+            getModels: () => catalog.filter((m) => curatedModels.some((c) => c.id === m.id)),
+          },
+          options.secrets?.openrouterApiKey,
+        ),
+      );
     }
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
     this.unlockCatalog = lockFile(`${this.catalogPath}.lock`);
@@ -571,7 +580,7 @@ export class Store {
       const playground = createPlayground(this.shared, row.id, this.spawnSession, jobs);
       registry.install(playground);
       // Custom extensions are installed but not selected: an agent turns them on in its own selection.
-      const addons = createAddons({ offline: this.options.provider === "faux" });
+      const addons = createAddons({ offline: this.options.provider === "faux", credentials: this.options.secrets });
       for (const extension of addons.list) registry.install(extension);
       const harness = await Harness.open(
         await openNodeSqliteStorage(row.dbPath),

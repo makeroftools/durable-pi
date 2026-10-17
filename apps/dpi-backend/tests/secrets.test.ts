@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
-import { applySecrets, fetchOpenBaoSecrets, type SecretsSettings } from "../src/secrets.js";
+import { fetchOpenBaoSecrets, secretFields, type SecretsSettings } from "../src/secrets.js";
 
 async function stub(handler: (path: string, token: string | undefined, body: string) => { status: number; body?: unknown }): Promise<{ addr: string; close: () => Promise<void>; seen: string[] }> {
   const seen: string[] = [];
@@ -53,12 +53,9 @@ test("OpenBao: AppRole login, KV-v2 read, and the value never touches disk or th
     assert.match(box.seen[0]!, /role_id.*role-123/);
     assert.match(box.seen[1]!, /token=tok-approle/);
 
-    // applySecrets fills the environment and reports only names, never values.
-    const env: NodeJS.ProcessEnv = {};
-    const applied = await applySecrets(settings, env);
-    assert.deepEqual(applied, { via: "approle", fields: ["OPENROUTER_API_KEY", "TYPESAFE_API_KEY"] });
-    assert.equal(env.OPENROUTER_API_KEY, "sk-model");
-    assert.equal(env.TYPESAFE_API_KEY, "ts-key");
+    // The resolved value stays in memory; the boot log names fields, never values.
+    const resolved = await fetchOpenBaoSecrets(settings);
+    assert.deepEqual(secretFields(resolved), ["OPENROUTER_API_KEY", "TYPESAFE_API_KEY"]);
   } finally {
     await box.close();
     await rm(root, { recursive: true, force: true });
@@ -86,9 +83,6 @@ test("OpenBao: a refusal fails closed and never reports a success", async () => 
     await writeFile(join(root, "token"), "tok-file\n", "utf8");
     const settings = settingsFor(root, box.addr);
     await assert.rejects(() => fetchOpenBaoSecrets(settings), /answered 403/);
-    const env: NodeJS.ProcessEnv = { OPENROUTER_API_KEY: "previous" };
-    await assert.rejects(() => applySecrets(settings, env));
-    assert.equal(env.OPENROUTER_API_KEY, "previous", "a failed fetch leaves the environment untouched");
   } finally {
     await box.close();
     await rm(root, { recursive: true, force: true });
