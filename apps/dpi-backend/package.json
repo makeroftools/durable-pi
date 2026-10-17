@@ -9,6 +9,7 @@
     "check": "tsc --noEmit -p .",
     "test": "tsx --test tests/*.test.ts",
     "token": "tsx scripts/token.ts",
+    "backup": "tsx scripts/backup.ts",
     "migrate-playground": "tsx scripts/migrate-playground.ts"
   },
   "dependencies": {

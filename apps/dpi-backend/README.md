@@ -138,6 +138,32 @@ Templates live in [`deploy/`](deploy/). The operator skill [`.claude/skills/agen
 ~/.dpi/backend.log                              service log
 ```
 
+## Backup and restore
+
+A backup snapshots `DPI_DATA_DIR` — the catalog, the shared App State, every session database and the archive —
+into a self-describing directory. Each database is copied with SQLite's `VACUUM INTO`, which reads a consistent
+snapshot with committed WAL included and never modifies the source, so a running device can be backed up. Every
+file's SHA-256 is recorded in `manifest.json`.
+
+```bash
+just backend backup ~/dpi-backups/local-$(date +%Y%m%d-%H%M%S)
+just backend backup-verify ~/dpi-backups/local-20260101-120000
+```
+
+Restore verifies every checksum and runs `PRAGMA integrity_check` before trusting the copy. It refuses a target
+that is not empty, and builds the copy beside the target before swapping it in, so a failed restore leaves the
+target exactly as it was. Restoring to a different directory rewrites the catalog's session paths.
+
+```bash
+# Disaster recovery: stop the backend, move the broken data dir aside, restore into the original path.
+mv ~/.dpi/backend ~/.dpi/backend.broken
+just backend restore ~/dpi-backups/local-20260101-120000 ~/.dpi/backend
+```
+
+`DPI_DATA_DIR` selects the source directory (default `$DPI_HOME/backend`). Tokens live in `backend.env`, outside
+the data directory, and are never part of a backup; session working directories are your projects, not device
+state.
+
 ## Guarantees and boundaries
 
 - Closing a client never stops work. A backend restart resumes unfinished tasks from their checkpoints. Replay-safe tools may rerun, and unsafe ones return an interrupted result.

@@ -27,6 +27,18 @@ dev *ARGS:
 token:
     npm run token
 
+# Snapshot this machine's durable state (catalog, App State, sessions, archive) to a directory
+backup DEST:
+    npm run backup -- create "{{ DEST }}"
+
+# Verify every checksum in a backup directory
+backup-verify SRC:
+    npm run backup -- verify "{{ SRC }}"
+
+# Restore a backup into an empty directory; stop the backend first, then point DPI_DATA_DIR at it
+restore SRC DEST:
+    npm run backup -- restore "{{ SRC }}" "{{ DEST }}"
+
 # Type check and run backend tests
 check:
     npm run check
