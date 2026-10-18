@@ -36,6 +36,14 @@ just backend service uninstall
 Add `loginctl enable-linger $USER` to keep it running after you log out. Remote devices and `just net up local`
 use the system units in [`deploy/`](deploy/); this user unit is for a workstation.
 
+### Health check
+
+`just doctor` asserts the guarantees this device depends on and **exits non-zero if any critical one is broken**:
+the env file and a real token; when `DPI_SECRETS=openbao`, the vault is initialized + unsealed and the AppRole
+material exists; `/healthz` is 200; a tokenless `/v1/device` is 401; and `/v1/device` lists models — which only
+happens once the provider received a credential. Sandbox policy and the boot unseal service are reported as
+warnings, not failures.
+
 ## Configuration: `~/.dpi/backend.env`
 
 | Key | Default | Meaning |

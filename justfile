@@ -40,3 +40,7 @@ install:
 
 # Type checks and unit tests, every app
 check: test::unit
+
+# Fail-closed health check of this device's operator harness (env, vault, backend, model credential)
+doctor:
+    cd apps/dpi-backend && npx tsx scripts/doctor.ts
