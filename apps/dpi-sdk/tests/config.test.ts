@@ -12,6 +12,7 @@ test("dpi-network.example.yaml parses: defaults plus the local device", () => {
   assert.deepEqual(Object.keys(config.devices), ["local"]);
   assert.equal(config.devices.local.url, "http://127.0.0.1:4780");
   assert.deepEqual(config.devices.local.startDirs, [DEFAULT_START_DIR]);
+  assert.deepEqual(config.devices.local.envKeys, ["OPENROUTER_API_KEY"]);
   for (const d of Object.values(config.devices)) {
     assert.ok(["local", "ssh", "exe-dev", "url"].includes(d.kind));
     assert.ok(d.port > 0 && d.node > 0 && d.codeDir && d.homeDir);
@@ -36,13 +37,29 @@ test("validation rejects bad kinds, missing fields and bad ids; exe-dev derives 
   assert.throws(() => parseNetworkConfig("devices:\n  a:\n    kind: local\n    roots: ['~']"), /renamed to "start_dirs"/);
   // host defaults by kind; env merges defaults and device and refuses managed or duplicate keys.
   const e = parseNetworkConfig(
-    "defaults:\n  env_keys: [OPENROUTER_API_KEY]\n  env: { DPI_PROVIDER: openrouter, LOG_LEVEL: info }\ndevices:\n  a:\n    kind: local\n    env: { DPI_PROVIDER: faux }\n  b:\n    kind: url\n    url: http://b\n    host: 10.0.0.5",
+    "defaults:\n  env: { DPI_PROVIDER: openrouter, LOG_LEVEL: info }\ndevices:\n  a:\n    kind: local\n    env_keys: [OPENROUTER_API_KEY]\n    env: { DPI_PROVIDER: faux }\n  b:\n    kind: url\n    url: http://b\n    host: 10.0.0.5",
   );
   assert.equal(e.devices.a.host, "127.0.0.1");
   assert.equal(e.devices.b.host, "10.0.0.5");
   assert.deepEqual(e.devices.a.env, { DPI_PROVIDER: "faux", LOG_LEVEL: "info" });
   assert.throws(() => parseNetworkConfig("devices:\n  a:\n    kind: local\n    env: { DPI_PORT: 1 }"), /own setting/);
   assert.throws(() => parseNetworkConfig("devices:\n  a:\n    kind: local\n    env_keys: [X]\n    env: { X: 1 }"), /also in env_keys/);
+  // env_keys is a secret copied from .env: local only. A remote device must use its own vault instead.
+  for (const remote of [
+    "kind: ssh\n    ssh: u@h\n    service: systemd\n    url: http://x",
+    "kind: exe-dev\n    vm: my-vm-1",
+    "kind: url\n    url: http://x",
+  ])
+    assert.throws(() => parseNetworkConfig(`devices:\n  a:\n    ${remote}\n    env_keys: [OPENROUTER_API_KEY]`), /secrets are copied only to a local device/);
+  // A defaults.env_keys must not leak to a remote device either.
+  assert.throws(
+    () => parseNetworkConfig("defaults:\n  env_keys: [OPENROUTER_API_KEY]\ndevices:\n  a:\n    kind: local\n  b:\n    kind: url\n    url: http://b"),
+    /secrets are copied only to a local device/,
+  );
+  // env_keys names are validated: UPPER_SNAKE_CASE, not managed, not duplicated.
+  assert.throws(() => parseNetworkConfig("devices:\n  a:\n    kind: local\n    env_keys: [lower]"), /UPPER_SNAKE_CASE/);
+  assert.throws(() => parseNetworkConfig("devices:\n  a:\n    kind: local\n    env_keys: [DPI_TOKEN]"), /own setting/);
+  assert.throws(() => parseNetworkConfig("devices:\n  a:\n    kind: local\n    env_keys: [X, X]"), /duplicates/);
 });
 
 test("sync upserts config devices, keeps UI devices and prunes removed config devices", async () => {

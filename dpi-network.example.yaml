@@ -27,6 +27,7 @@
 #   DPI_HOST         host (default 127.0.0.1 for kind local, 0.0.0.0 otherwise)
 #   DPI_START_DIRS   start_dirs, colon-separated
 #   <NAME>=<value>   for each name in env_keys, with its value read from this checkout's .env
+#                    (kind local only; a remote device must keep the secret in its own vault — see below)
 #   <NAME>=<value>   for each entry in env (defaults.env merged with the device's env)
 
 defaults:
@@ -35,7 +36,10 @@ defaults:
   code_dir: ~/dpi                  # where apps/dpi-backend + apps/dpi-sdk are synced (ssh / exe-dev)
   home_dir: ~/.dpi                 # backend.env, data and logs; deploys never touch it
   start_dirs: ["~/dpi-work"]       # where new sessions start (created if missing); any existing folder works as a cwd
-  env_keys: [OPENROUTER_API_KEY]   # secrets: copied by name from .env, never written here
+  # env_keys: [OPENROUTER_API_KEY] # secrets copied by name from this checkout's .env. Allowed for kind: local
+  #                                # only. A remote device keeps its model credential in its own OpenBao vault
+  #                                # (env: { DPI_SECRETS: openbao, DPI_OPENBAO_ADDR: http://127.0.0.1:8200 }) or runs
+  #                                # without one; the central key never travels over the LAN.
   # env:                           # plain settings, written as-is
   #   DPI_PROVIDER: faux           # the free deterministic model, for tests
 
@@ -43,6 +47,7 @@ devices:
   local:
     name: Laptop
     kind: local
+    env_keys: [OPENROUTER_API_KEY] # local only; the value is read from this checkout's .env
 
   # A Mac or Linux box you can reach with passwordless ssh.
   # mac-mini:

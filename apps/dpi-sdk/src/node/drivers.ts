@@ -107,6 +107,10 @@ async function deploy(device: NetDevice, ctx: DriverContext) {
 
 /** Write <home>/backend.env, keeping an existing token unless rotating. Secrets travel on stdin. */
 async function writeEnv(device: NetDevice, ctx: DriverContext, rotate = false) {
+  // Defense in depth: parseNetworkConfig already refuses this, but env_keys is the one path that would put a
+  // plaintext secret at rest on a device. Never copy one to a device whose agents we do not treat as local.
+  if (device.envKeys.length && device.kind !== "local")
+    throw Error(`${device.id}: refusing to copy secrets to a ${device.kind} device; give it its own OpenBao vault or no model credential`);
   const local = localEnv(ctx.config);
   const missing = device.envKeys.filter((k) => !(local[k] ?? process.env[k]));
   if (missing.length) ctx.log(`warning: ${missing.join(", ")} not found in ${join(ctx.config.root, ".env")} or the environment`);

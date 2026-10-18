@@ -23,7 +23,7 @@ export interface NetDevice {
   /** Bind address written as DPI_HOST: 127.0.0.1 for local devices, 0.0.0.0 otherwise. */
   host: string;
   startDirs: string[];
-  /** Variables copied by name from this checkout's .env (secrets). */
+  /** Secrets copied by name from this checkout's .env. Kind `local` only; remote devices use their own vault. */
   envKeys: string[];
   /** Literal extra variables for backend.env (defaults.env merged with the device's env). */
   env: Record<string, string>;
@@ -115,6 +115,19 @@ export function parseNetworkConfig(text: string, file = NETWORK_FILE): NetworkCo
       ...(typeof d.token_env === "string" ? { tokenEnv: d.token_env } : {}),
     };
     device.env = envMap(defaults.env, (value as Raw).env, device.envKeys, where);
+    if (new Set(device.envKeys).size !== device.envKeys.length) throw Error(`${where}.env_keys has duplicates`);
+    for (const key of device.envKeys) {
+      if (!/^[A-Z_][A-Z0-9_]*$/.test(key)) throw Error(`${where}.env_keys: ${key} is not an UPPER_SNAKE_CASE name`);
+      if ((MANAGED_ENV as readonly string[]).includes(key))
+        throw Error(`${where}.env_keys: ${key} is written from its own setting (port, host, start_dirs); set that instead`);
+    }
+    // Secrets are copied from this checkout's .env, so they would sit in a remote device's backend.env where
+    // its agents can read them. A remote device keeps its model credential in its own vault instead.
+    if (device.envKeys.length && kind !== "local")
+      throw Error(
+        `${where}.env_keys: secrets are copied only to a local device. Give a ${kind} device its own vault ` +
+          `(env: { DPI_SECRETS: openbao, DPI_OPENBAO_ADDR: http://127.0.0.1:8200 }) or run it without model credentials.`,
+      );
     if (d.service !== undefined) {
       if (d.service !== "launchd" && d.service !== "systemd") throw Error(`${where}.service must be launchd or systemd`);
       device.service = d.service;
