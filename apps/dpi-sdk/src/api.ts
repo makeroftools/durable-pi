@@ -115,6 +115,8 @@ export interface SessionSummary {
   busy: boolean;
   error?: string;
   agents: AgentSummary[];
+  /** The session's token/cost totals. Present only while the device has the session open; omitted when closed. */
+  usage?: UsageTotals;
   /** Automatic compaction thresholds, shared by every agent of the session. */
   compaction?: CompactionSettings;
 }

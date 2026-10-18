@@ -159,6 +159,10 @@ test("REST v1: auth, sessions, agents, messages, waits, idempotency, errors", as
     const archived = await client.session("Twin").archive().catch((e: DpiError) => e);
     assert.ok(archived instanceof DpiError && archived.code === "ambiguous");
     const tree = await client.tree();
+    assert.ok(
+      tree.sessions.find((s) => s.id === s1.id)?.usage,
+      "an open session carries its usage totals in the tree",
+    );
     await client.session(tree.sessions.find((s) => s.name === "Twin")!.id).archive();
     assert.equal((await client.sessions()).length, 2);
 

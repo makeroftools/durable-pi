@@ -20,6 +20,7 @@ import Inspector from "./components/Inspector.vue";
 import OfflinePanel from "./components/OfflinePanel.vue";
 import NewSessionDialog from "./components/NewSessionDialog.vue";
 import BatchLaunchDialog from "./components/BatchLaunchDialog.vue";
+import FleetView from "./components/FleetView.vue";
 import PromptDialog from "./components/PromptDialog.vue";
 import ModelPicker from "./components/ModelPicker.vue";
 import {
@@ -161,6 +162,9 @@ onBeforeUnmount(() => {
         <button class="secondary small" @click="openBatchLaunch">
           <Layers :size="18" />Batch launch
         </button>
+        <button class="secondary small" @click="ui.dialog = { kind: 'fleet' }">
+          <Activity :size="18" />Fleet
+        </button>
         <button
           class="icon-button inspector-toggle"
           aria-label="Toggle inspector"
@@ -227,6 +231,7 @@ onBeforeUnmount(() => {
       @close="ui.dialog = undefined"
     />
     <ModelPicker v-else-if="ui.dialog?.kind === 'models'" @close="ui.dialog = undefined" />
+    <FleetView v-else-if="ui.dialog?.kind === 'fleet'" @close="ui.dialog = undefined" />
     <div
       v-else-if="ui.dialog?.kind === 'path'"
       class="modal-backdrop"
@@ -325,6 +330,16 @@ onBeforeUnmount(() => {
               <p>
                 Its tree dims and shows the restart command. Checkpointed jobs recover on boot.
                 Replay-safe tools may rerun. Other interrupted tools return an error.
+              </p>
+            </div>
+          </li>
+          <li>
+            <span>07</span>
+            <div>
+              <strong>Watch the whole fleet</strong>
+              <p>
+                Fleet lists every session on every device with live tokens and cost, and opens the one
+                you pick.
               </p>
             </div>
           </li>

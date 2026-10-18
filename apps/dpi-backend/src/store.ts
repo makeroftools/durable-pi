@@ -1158,10 +1158,18 @@ export class Store {
   }
 
   async sessionSummary(row: SessionRow): Promise<SessionSummary> {
-    if (!this.opened.has(row.id))
+    const opened = this.opened.get(row.id);
+    if (!opened)
       return { ...this.sessionSummaryBase(row), busy: false, agents: [], error: this.errors.get(row.id) ?? "Session unavailable" };
     const agents = await this.agents(row);
-    return { ...this.sessionSummaryBase(row), busy: agents.some((a) => a.busy), agents };
+    // Usage totals ride along for an open session (the harness is already loaded) so the fleet view can show
+    // cost without opening every session on its own. A closed session simply omits them.
+    return {
+      ...this.sessionSummaryBase(row),
+      busy: agents.some((a) => a.busy),
+      agents,
+      usage: await this.usage(opened.harness),
+    };
   }
 
   async tree(): Promise<DeviceTree> {

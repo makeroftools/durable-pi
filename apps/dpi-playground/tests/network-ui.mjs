@@ -556,6 +556,21 @@ try {
   await expect(page.locator(".tree-row.session").filter({ hasText: "project-gamma" })).toBeVisible();
   pass("batch launch: partial failure stays open, retry narrows to the failed directory");
 
+  // Fleet: every session on every device in one table; clicking a row opens it.
+  await page.getByRole("button", { name: "Fleet", exact: true }).click();
+  await expect(page.locator(".fleet-modal")).toBeVisible();
+  await expect(page.locator(".fleet-summary")).toContainText("sessions");
+  await expect(page.locator(".fleet-row").filter({ hasText: "project-alpha" })).toBeVisible();
+  await page
+    .locator(".fleet-row")
+    .filter({ hasText: "project-alpha" })
+    .first()
+    .click();
+  await expect(page.locator(".fleet-modal")).toHaveCount(0);
+  await expect(page.locator(".tree-row.session").filter({ hasText: "project-alpha" })).toBeVisible();
+  await expect(page.locator(".tree-row.agent.sel")).toHaveCount(1);
+  pass("fleet: every session in one table, clicking a row opens it");
+
   expect(errors).toEqual([]);
   pass("no browser runtime errors");
   console.log("ALL NETWORK UI CHECKS PASSED");

@@ -17,11 +17,11 @@ The contract every Durable Agent Network client uses: the web hub, `dpi-tui`, sc
 |---|---|---|
 | `GET /healthz` | (no auth) | `{ok:true}` |
 | `GET /v1/device` | | `DeviceInfo`: uid, name, hostname, platform, `apiVersion`, `durableVersion`, `startedAt`, models, `defaultModel`, `startDirs`, storage, `codeDir` (the checkout it runs from), capabilities, `jobs` (durable job definitions) |
-| `GET /v1/tree` | | `DeviceTree`: sessions with agents and busy/background |
+| `GET /v1/tree` | | `DeviceTree`: sessions with agents, busy/background, and `usage` for sessions the device has open |
 | `GET /v1/events` | `?docs=app.shared-state` | device stream |
 | `GET /v1/fs/dirs` | `?path=` (empty = start dirs) | `{path, parent, dirs[]}`, one level, directories only |
 | `GET /v1/docs/app.shared-state` | | `{kind, value, revision}` |
-| `GET /v1/sessions` | | `SessionSummary[]` |
+| `GET /v1/sessions` | | `SessionSummary[]`; each carries `usage` totals while the session is open (the device omits them when closed) |
 | `POST /v1/sessions` | `{name, cwd, model:{provider,modelId}, thinkingLevel?, prompt?, instructions?}` | `201 LaunchResult`: the `SessionSummary`, plus `prompt:{submissionId}` when an opening brief was admitted and `seedError` when the session exists but seeding failed. The brief is submitted under the deterministic `requestId` `launch:<sessionId>:prompt`, so a repeated launch seeds once |
 | `GET / PATCH / DELETE /v1/sessions/:s` | PATCH `{name}` | summary (with its `compaction` thresholds); DELETE aborts all work, moves the files to `archive/` and returns `{archived}` |
 | `GET / PATCH /v1/sessions/:s/compaction` | PATCH `{enabled?, reserveTokens?, backgroundTokens?, keepRecentTokens?}` | the session's automatic compaction thresholds, read by pi-durable at its next request. Values are margins: the blocking summary starts at the model's context window minus `reserveTokens`, and the background one `backgroundTokens` earlier (0 turns it off). Default: a background summary at 200k tokens and a blocking one at 250k, or pi-durable's margins on smaller windows. Switching an agent to a window the thresholds do not fit refits them |

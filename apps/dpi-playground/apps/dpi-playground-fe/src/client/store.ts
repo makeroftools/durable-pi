@@ -251,6 +251,7 @@ export type Dialog =
   | { kind: "new-session"; deviceId?: string }
   | { kind: "batch-launch"; deviceId?: string }
   | { kind: "models" }
+  | { kind: "fleet" }
   | { kind: "help" }
   | { kind: "path"; path: string }
   | { kind: "compaction" }
