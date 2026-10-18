@@ -1,0 +1,22 @@
+[Unit]
+Description=Unseal the Durable Pi OpenBao vault (user)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=__APP__
+ExecStart=__NODE__ __APP__/node_modules/tsx/dist/cli.mjs scripts/openbao-unseal.ts
+Environment=PATH=__PATH__
+Environment=HOME=__HOME__
+Environment=DPI_HOME=__DPI_HOME__
+Environment=NODE_NO_WARNINGS=1
+# Retries until Docker has the vault answering; a sealed vault past the timeout fails and is retried.
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=10
+StandardOutput=append:__LOG__
+StandardError=append:__LOG__
+
+[Install]
+WantedBy=default.target

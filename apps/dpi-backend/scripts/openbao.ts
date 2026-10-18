@@ -1,9 +1,12 @@
 #!/usr/bin/env tsx
 // Persistent OpenBao lifecycle: a file-storage container the operator initializes once and unseals after restarts.
 // The policy and AppRole are `scripts/openbao-setup.ts`. See src/openbao.ts.
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { openbao, openbaoConfig } from "../src/openbao.js";
+import { openbaoUnsealUnitPlan } from "../src/service.js";
 
 const argv = process.argv.slice(2);
 const action = argv.find((arg) => !arg.startsWith("-")) ?? "status";
@@ -38,8 +41,55 @@ try {
     );
   } else if (action === "config") {
     process.stdout.write(openbaoConfig());
+  } else if (action === "service") {
+    const sub = argv.filter((arg) => !arg.startsWith("-"))[1] ?? "status";
+    if (process.platform !== "linux")
+      throw Error("the unseal service is a systemd user unit and only runs on Linux");
+    const plan = openbaoUnsealUnitPlan(resolve(import.meta.dirname, ".."), { dpiHome: opts.home });
+    const run = (argv2: string[], check = true) => {
+      const result = spawnSync(argv2[0]!, argv2.slice(1), { stdio: "inherit" });
+      if (result.error) throw result.error;
+      const code = result.status ?? 1;
+      if (check && code !== 0) throw Error(`${argv2.join(" ")} exited ${code}`);
+    };
+    switch (sub) {
+      case "install":
+        mkdirSync(dirname(plan.path), { recursive: true });
+        writeFileSync(plan.path, plan.content, { mode: 0o644 });
+        run(plan.reload);
+        run(plan.enable);
+        console.log(`Installed ${plan.path}`);
+        break;
+      case "uninstall":
+        run(plan.disable, false);
+        if (existsSync(plan.path)) rmSync(plan.path);
+        run(plan.reload);
+        console.log(`Removed ${plan.path}`);
+        break;
+      case "start":
+        run(plan.start);
+        break;
+      case "stop":
+        run(plan.stop);
+        break;
+      case "restart":
+        run(plan.restart);
+        break;
+      case "status":
+        run(plan.status, false);
+        break;
+      case "logs":
+        run(plan.logs, false);
+        break;
+      case "print":
+        process.stdout.write(plan.content);
+        break;
+      default:
+        console.log("Usage: tsx scripts/openbao.ts service <install|uninstall|start|stop|restart|status|logs|print>");
+        process.exit(1);
+    }
   } else {
-    console.log("Usage: tsx scripts/openbao.ts <up|init --operator|unseal|status|config>");
+    console.log("Usage: tsx scripts/openbao.ts <up|init --operator|unseal|status|config|service>");
     process.exit(1);
   }
 } catch (error) {

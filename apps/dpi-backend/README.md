@@ -107,6 +107,18 @@ A fresh vault starts **sealed** on every restart; `just openbao unseal` reads th
 and offline. `DPI_OPENBAO_CONTAINER`, `DPI_OPENBAO_IMAGE` and `DPI_OPENBAO_ADDR` override the defaults. This
 replaces the dev-mode container used for evaluation: stop that one first so both do not bind port 8200.
 
+A restart leaves the vault **sealed**, and the backend **fails closed** until it is unsealed. To recover after a
+reboot without a human, install the boot-time unsealer as a systemd user service:
+
+```bash
+just openbao service install   # write + enable + start dpi-openbao-unseal.service
+just openbao service status    # install|uninstall|start|stop|restart|status|logs|print
+```
+
+It is idempotent and fail-closed: an already-unsealed vault is a no-op, an uninitialized vault is reported
+without looping, and a vault that stays sealed is retried (`Restart=on-failure`) and logged to
+`~/.dpi/openbao-unseal.log`. The unseal material stays in `~/.dpi/openbao-init.json` (0600).
+
 ## Execution sandbox
 
 By default an agent's `bash`, `read`, `write` and `edit` run on the host **as you, unsandboxed**. Set

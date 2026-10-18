@@ -92,6 +92,47 @@ export interface UnsealMaterial {
   rootToken: string;
 }
 
+export interface UnsealTarget {
+  status(): Promise<{ initialized: boolean; sealed: boolean }>;
+  unseal(): Promise<{ unsealed: boolean }>;
+}
+
+export interface UnsealRetryOptions {
+  /** Give up after this long. The container may still be starting, so unreachable is retried, not failed. */
+  timeoutMs?: number;
+  intervalMs?: number;
+}
+
+export type UnsealOutcome =
+  | { unsealed: true }
+  | { unsealed: false; reason: "uninitialized" | "timeout"; lastError?: string };
+
+/**
+ * Unseal an initialized-but-sealed vault, retrying until the container answers. Built for boot: Docker is often
+ * still starting the vault, so an unreachable status is retried. An uninitialized vault is **not** an error (there
+ * is nothing to unseal yet) and is reported so a boot service exits cleanly instead of restart-looping forever.
+ */
+export async function unsealWithRetry(vault: UnsealTarget, opts: UnsealRetryOptions = {}): Promise<UnsealOutcome> {
+  const timeoutMs = opts.timeoutMs ?? 120_000;
+  const intervalMs = opts.intervalMs ?? 2_000;
+  const deadline = Date.now() + timeoutMs;
+  let lastError: string | undefined;
+  for (;;) {
+    try {
+      const state = await vault.status();
+      if (!state.initialized) return { unsealed: false, reason: "uninitialized" };
+      if (!state.sealed) return { unsealed: true };
+      const result = await vault.unseal();
+      if (result.unsealed) return { unsealed: true };
+      lastError = "still sealed after applying the keys";
+    } catch (error) {
+      lastError = (error as Error).message;
+    }
+    if (Date.now() >= deadline) return { unsealed: false, reason: "timeout", lastError };
+    await sleep(intervalMs);
+  }
+}
+
 export function openbao(opts: OpenbaoOptions, run: Runner = defaultRunner) {
   const configPath = join(opts.home, "openbao.hcl");
   const initPath = join(opts.home, "openbao-init.json");

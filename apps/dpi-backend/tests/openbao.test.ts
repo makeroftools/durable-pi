@@ -5,7 +5,16 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openbao, openbaoConfig, parseInit, parseStatus, type CommandResult, type Runner } from "../src/openbao.js";
+import {
+  openbao,
+  openbaoConfig,
+  parseInit,
+  parseStatus,
+  unsealWithRetry,
+  type CommandResult,
+  type Runner,
+  type UnsealTarget,
+} from "../src/openbao.js";
 import { freePort } from "./helpers.js";
 
 const OPTIONS = {
@@ -178,6 +187,61 @@ test("unseal reads the stored keys and reports the vault unsealed", async () => 
     assert.deepEqual(applied, ["k1", "k2", "k3"]);
   } finally {
     await cleanup();
+  }
+});
+
+test("unsealWithRetry retries an unreachable vault, then unseals it", async () => {
+  let statusCalls = 0;
+  let unsealCalls = 0;
+  const vault: UnsealTarget = {
+    async status() {
+      statusCalls += 1;
+      if (statusCalls < 3) throw Error("OpenBao is not answering; is the container running?");
+      return { initialized: true, sealed: true };
+    },
+    async unseal() {
+      unsealCalls += 1;
+      return { unsealed: true };
+    },
+  };
+  const result = await unsealWithRetry(vault, { timeoutMs: 1_000, intervalMs: 1 });
+  assert.deepEqual(result, { unsealed: true });
+  assert.equal(statusCalls, 3, "retried until the container answered");
+  assert.equal(unsealCalls, 1);
+});
+
+test("unsealWithRetry reports an uninitialized vault without applying keys", async () => {
+  let unsealCalls = 0;
+  const vault: UnsealTarget = {
+    async status() {
+      return { initialized: false, sealed: true };
+    },
+    async unseal() {
+      unsealCalls += 1;
+      return { unsealed: true };
+    },
+  };
+  assert.deepEqual(await unsealWithRetry(vault, { timeoutMs: 1_000, intervalMs: 1 }), {
+    unsealed: false,
+    reason: "uninitialized",
+  });
+  assert.equal(unsealCalls, 0, "nothing to unseal before init");
+});
+
+test("unsealWithRetry times out while the vault stays sealed", async () => {
+  const vault: UnsealTarget = {
+    async status() {
+      return { initialized: true, sealed: true };
+    },
+    async unseal() {
+      return { unsealed: false };
+    },
+  };
+  const result = await unsealWithRetry(vault, { timeoutMs: 5, intervalMs: 1 });
+  assert.equal(result.unsealed, false);
+  if (!result.unsealed) {
+    assert.equal(result.reason, "timeout");
+    assert.match(result.lastError ?? "", /still sealed/);
   }
 });
 

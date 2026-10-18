@@ -33,3 +33,7 @@ unseal:
 # Show whether the container is initialized and sealed
 status:
     npx tsx scripts/openbao.ts status
+
+# Boot-time unseal as a systemd user service (install|uninstall|start|stop|restart|status|logs|print)
+service *ARGS:
+    npx tsx scripts/openbao.ts service "$@"

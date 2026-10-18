@@ -5,7 +5,10 @@ import { readFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 
-export const USER_UNIT = "dpi-backend.service";
+export const BACKEND_UNIT = "dpi-backend.service";
+export const UNSEAL_UNIT = "dpi-openbao-unseal.service";
+/** The backend user unit; kept for callers that predate the unseal unit. */
+export const USER_UNIT = BACKEND_UNIT;
 
 export interface ServiceValues {
   APP: string;
@@ -59,25 +62,44 @@ export interface UserUnitPlan {
   linger: string;
 }
 
-export function userUnitPlan(
-  appDir: string,
-  opts: { node?: string; home?: string; dpiHome?: string; log?: string } = {},
-): UserUnitPlan {
-  const values = serviceValues(appDir, opts);
-  const template = readFileSync(join(import.meta.dirname, "../deploy/dpi-backend.user.service"), "utf8");
+interface PlanOptions {
+  node?: string;
+  home?: string;
+  dpiHome?: string;
+  log?: string;
+}
+
+/** Build a user-unit plan for one rendered template. Its `systemctl --user` argv is pinned by the tests. */
+function buildPlan(unit: string, templateFile: string, values: ServiceValues): UserUnitPlan {
+  const template = readFileSync(join(import.meta.dirname, `../deploy/${templateFile}`), "utf8");
   const systemctl = (...args: string[]) => ["systemctl", "--user", ...args];
   const user = userInfo().username;
   return {
-    path: join(values.HOME, ".config/systemd/user", USER_UNIT),
+    path: join(values.HOME, ".config/systemd/user", unit),
     content: renderTemplate(template, { ...values }),
     reload: systemctl("daemon-reload"),
-    enable: systemctl("enable", "--now", USER_UNIT),
-    disable: systemctl("disable", "--now", USER_UNIT),
-    start: systemctl("start", USER_UNIT),
-    stop: systemctl("stop", USER_UNIT),
-    restart: systemctl("restart", USER_UNIT),
-    status: systemctl("status", USER_UNIT, "--no-pager"),
-    logs: ["journalctl", "--user", "-u", USER_UNIT, "-n", "200", "-f"],
+    enable: systemctl("enable", "--now", unit),
+    disable: systemctl("disable", "--now", unit),
+    start: systemctl("start", unit),
+    stop: systemctl("stop", unit),
+    restart: systemctl("restart", unit),
+    status: systemctl("status", unit, "--no-pager"),
+    logs: ["journalctl", "--user", "-u", unit, "-n", "200", "-f"],
     linger: `loginctl enable-linger ${user}`,
   };
+}
+
+export function userUnitPlan(appDir: string, opts: PlanOptions = {}): UserUnitPlan {
+  return buildPlan(BACKEND_UNIT, "dpi-backend.user.service", serviceValues(appDir, opts));
+}
+
+/**
+ * The boot-time unsealer: recovers a sealed vault after a reboot without a human. It writes its own log so an
+ * unseal failure is visible next to the backend's. `just openbao service ...` manages it.
+ */
+export function openbaoUnsealUnitPlan(appDir: string, opts: PlanOptions = {}): UserUnitPlan {
+  const home = opts.home ?? homedir();
+  const dpiHome = opts.dpiHome ?? process.env.DPI_HOME ?? join(home, ".dpi");
+  const values = serviceValues(appDir, { ...opts, log: opts.log ?? join(dpiHome, "openbao-unseal.log") });
+  return buildPlan(UNSEAL_UNIT, "dpi-openbao-unseal.user.service", values);
 }
