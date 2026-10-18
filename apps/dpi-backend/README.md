@@ -148,6 +148,10 @@ just sandbox check    # run the real sandbox and verify containment (fails close
 An image without `bash` or without the project's toolchain will not run the agent's commands; build one, or
 point `DPI_SANDBOX_IMAGE` at an image that has them. `DPI_SANDBOX_NETWORK=none` blocks all egress.
 
+An extra root that contains (or sits inside) the session's working directory is **refused at session start**:
+the container mounts the writable root and then the read-only roots, so such a root would silently shadow the
+cwd and make it read-only. Use roots that do not contain one another.
+
 **Known limits.** The path guard re-checks each call, so a symlink swapped between check and open is not
 defended against (TOCTOU). Killing a timed-out command stops the `docker exec` client; the in-container process
 may linger until the container is removed. Neither replaces running the device on a machine you already trust.

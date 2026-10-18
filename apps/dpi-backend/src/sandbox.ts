@@ -145,6 +145,16 @@ export class SandboxExecutionEnv extends NodeExecutionEnv {
     super({ cwd: options.cwd, shellPath: options.shellPath, shellEnv: options.shellEnv });
     if (!options.roots.length) throw Error("SandboxExecutionEnv needs at least one root");
     this.roots = options.roots.map(canonical);
+    // Fail closed on overlapping roots. The shell mounts the writable root and then the read-only roots, so an
+    // extra root that contains (or sits inside) the working root is mounted after it and silently shadows it:
+    // the session can no longer write its own cwd. A startup error with the two paths is strictly better.
+    const writable = this.roots[0]!;
+    for (const extra of this.roots.slice(1)) {
+      if (within([extra], writable) || within([writable], extra))
+        throw Error(
+          `Sandbox root overlaps the session working directory: ${extra} and ${writable} (use roots that do not contain one another)`,
+        );
+    }
     this.container = options.container;
     this.tempRoot = join(this.roots[0]!, ".dpi-tmp");
   }

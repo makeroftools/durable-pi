@@ -38,6 +38,24 @@ test("sandbox env confines filesystem operations to its roots, symlinks included
   }
 });
 
+test("an extra root that overlaps the working root is refused, not silently shadowed", async () => {
+  const t = await tempStore();
+  try {
+    const base = { cwd: t.work, shellPath: "/bin/true", container: "dpi-test-unused" };
+    // An ancestor of the cwd is mounted read-only after it and would shadow the write.
+    assert.throws(
+      () => new SandboxExecutionEnv({ ...base, roots: [t.work, t.root] }),
+      /overlaps the session working directory/,
+    );
+    // The same root twice is equally ambiguous.
+    assert.throws(() => new SandboxExecutionEnv({ ...base, roots: [t.work, t.work] }), /overlaps/);
+    // Disjoint roots are accepted.
+    assert.doesNotThrow(() => new SandboxExecutionEnv({ ...base, roots: [t.work, join(t.root, "other")] }));
+  } finally {
+    await t.cleanup();
+  }
+});
+
 // Requires Docker and an image with bash (default node:24-slim). Opt in: DPI_SANDBOX_TEST=1 npm test.
 test("sandbox env runs commands in a container that cannot see outside its roots", { skip: process.env.DPI_SANDBOX_TEST !== "1" }, async () => {
   const t = await tempStore();
