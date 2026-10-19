@@ -19,6 +19,7 @@ import {
 import type { Context } from "@earendil-works/chord";
 import { JobRuns, jobDef, resolveJobInput, type Jobs } from "./jobs.js";
 import { searchHistory } from "./history.js";
+import { createSubagents } from "./subagents.js";
 
 export const Workspace = defineDoc<AppState>({
   kind: "demo.workspace",
@@ -404,7 +405,8 @@ export function createPlayground(shared: SharedState, sessionId: string, spawn: 
         const child = await tx.createConversation({
           ownership: { kind: "task", taskId: api.taskId },
         });
-        await configure(tx, child.id, { tools: { remove: [subagent] } });
+        // A child may not start more subagents, through either the legacy or the parallel tool.
+        await configure(tx, child.id, { tools: { remove: [subagent, subagents.tool] } });
         return child.id;
       }, ctx);
       await api.details({ conversationId: id }, ctx);
@@ -428,6 +430,7 @@ export function createPlayground(shared: SharedState, sessionId: string, spawn: 
       };
     },
   });
+  const subagents = createSubagents({ hiddenTools: [subagent] });
   const startSession = defineTool({
     name: "start_session",
     description:
@@ -485,7 +488,7 @@ export function createPlayground(shared: SharedState, sessionId: string, spawn: 
   });
   return defineExtension({
     name: "playground",
-    tasks: jobs.tasks,
+    tasks: [...jobs.tasks, ...subagents.tasks],
     tools: [
       readAppState,
       updateState,
@@ -495,6 +498,7 @@ export function createPlayground(shared: SharedState, sessionId: string, spawn: 
       searchHistoryTool,
       pingOnCall,
       subagent,
+      subagents.tool,
       startSession,
       handoff,
     ],
@@ -502,7 +506,7 @@ export function createPlayground(shared: SharedState, sessionId: string, spawn: 
       section(
         "playground",
         () =>
-          `You are a concise coding agent in the Durable Pi playground. Explain only what matters. Use only the tools you are offered; read only agents get no tools that write. Use read_state to inspect App State and update_state to create, update, delete, or increment any field. App State is shared across all agents, sessions, conversations and forks in this demo. It survives browser closure, interrupted agents, and backend restarts. Forks use the current shared object rather than a historical copy. Read before writing because other agents and humans can change it. Use only read_state and update_state for this object, never inspect or edit its database files. App State is a flexible JSON object: numbers, booleans, strings, arrays, nested objects, and null all render as live controls in the UI. Read before editing. Use list_durable_jobs and run_durable_job to run a repeatable durable job (a named workflow with checkpointed phases) when asked; pass only the inputs list_durable_jobs documents. Runs continue in the background: check them with check_durable_job, and wait only when asked. Use search_history to look back at earlier messages, tool calls or entries by number, including what came before a reset, handoff or compaction. Use ping_on_call_engineer only when asked to page someone; it works once. Use subagent only when explicitly asked to delegate. Use start_session only when asked to start a new session; it runs on its own. Never claim an action happened without using its tool. Background runs finish independently; do not wait in bash. A browser disconnect does not stop your work.`,
+          `You are a concise coding agent in the Durable Pi playground. Explain only what matters. Use only the tools you are offered; read only agents get no tools that write. Use read_state to inspect App State and update_state to create, update, delete, or increment any field. App State is shared across all agents, sessions, conversations and forks in this demo. It survives browser closure, interrupted agents, and backend restarts. Forks use the current shared object rather than a historical copy. Read before writing because other agents and humans can change it. Use only read_state and update_state for this object, never inspect or edit its database files. App State is a flexible JSON object: numbers, booleans, strings, arrays, nested objects, and null all render as live controls in the UI. Read before editing. Use list_durable_jobs and run_durable_job to run a repeatable durable job (a named workflow with checkpointed phases) when asked; pass only the inputs list_durable_jobs documents. Runs continue in the background: check them with check_durable_job, and wait only when asked. Use search_history to look back at earlier messages, tool calls or entries by number, including what came before a reset, handoff or compaction. Use ping_on_call_engineer only when asked to page someone; it works once. Use subagent only when explicitly asked to delegate one blocking task. Use subagents to spawn, fan out, steer, stop or join persistent children in parallel; children survive your interruption and a backend restart, at most four run at once by default (hard cap eight), and answers are reported back once. Use start_session only when asked to start a new session; it runs on its own. Never claim an action happened without using its tool. Background runs finish independently; do not wait in bash. A browser disconnect does not stop your work.`,
         { tag: false },
       ),
     ],

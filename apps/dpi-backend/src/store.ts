@@ -64,6 +64,7 @@ import { SandboxExecutionEnv, SANDBOX_SHELL, sandboxShellEnv, type SandboxSettin
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createPlayground, Workspace, type SpawnSession } from "./extensions.js";
 import { createJobs, JobRuns, JOB_DEFS, jobDef, resolveJobInput, type Jobs } from "./jobs.js";
+import { SUBAGENTS_DOC_KIND, Subagents } from "./subagents.js";
 import { ADDON_INFO, createAddons, PROMPTS, PromptChecklist, type Addons } from "./addons.js";
 import { JOB_RUNS_DOC } from "../../dpi-sdk/src/jobs.js";
 
@@ -78,6 +79,7 @@ export const WRITE_TOOLS = new Set([
   "run_durable_job",
   "ping_on_call_engineer",
   "subagent",
+  "subagents",
   "start_session",
 ]);
 
@@ -105,7 +107,7 @@ export interface StoreOptions {
 /** Agent documents a client may read or stream, by kind. */
 /** apps/dpi-backend/src → the checkout root. */
 const CODE_DIR = resolve(import.meta.dirname, "../../..");
-const AGENT_DOCS = { [JOB_RUNS_DOC]: JobRuns, "demo.workspace": Workspace } as const;
+const AGENT_DOCS = { [JOB_RUNS_DOC]: JobRuns, [SUBAGENTS_DOC_KIND]: Subagents, "demo.workspace": Workspace } as const;
 export const AGENT_DOC_KINDS = Object.keys(AGENT_DOCS);
 export const DEVICE_DOC_KINDS = ["app.shared-state"];
 

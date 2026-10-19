@@ -43,14 +43,36 @@ The contract every Durable Agent Network client uses: the web hub, `dpi-tui`, sc
 | `GET / PATCH .../agents/:a/extensions` | PATCH `{name, enabled}` or `{prompt, enabled}` | `{extensions, builtIn}`: the custom extensions `system-prompts` (a checklist of the prompts in `prompts/`) and `jev-damage-control` (Jev judges each bash command and blocks destructive ones; the command goes to the Jev API, and a Jev error lets it run). Both are off by default. A change applies from the agent's next request |
 | `POST .../agents/:a/compact` | `{instructions?}` | `{taskId}` |
 | `POST .../agents/:a/reset` | `{note?}` | `{ok}` |
-| `GET .../agents/:a/docs/:kind` | `demo.job-runs` | `{kind, value}` |
+| `GET .../agents/:a/docs/:kind` | `demo.job-runs`, `dpi.subagents` | `{kind, value}` |
 | `POST .../agents/:a/demo/state` | `{operation, path, value?, expectedRevision?}` | `{ok, value, revision}`: the new App State. A stale `expectedRevision` returns `409 conflict` |
 | `POST .../agents/:a/demo/jobs` | `{job, input?}` | `201 {taskId}`: a durable job run the conversation owns in the background, anchored by a `demo.job` entry |
 | `POST .../agents/:a/demo/jobs/:taskId/approval` | `{approved}` | `{ok}`; `409 conflict` when the run is not waiting |
 
 ## Agent tools
 
-Every agent gets the coding tools `read`, `write`, `edit` and `bash`, plus the playground tools `read_state`, `update_state`, `list_durable_jobs`, `run_durable_job`, `check_durable_job`, `search_history`, `ping_on_call_engineer`, `subagent`, `start_session` and `handoff`. `readOnly` removes the eight that write: `bash`, `write`, `edit`, `update_state`, `run_durable_job`, `ping_on_call_engineer`, `subagent` and `start_session`. `GET .../agents/:a` lists each tool with its replay policy and whether it is offered.
+Every agent gets the coding tools `read`, `write`, `edit` and `bash`, plus the playground tools `read_state`, `update_state`, `list_durable_jobs`, `run_durable_job`, `check_durable_job`, `search_history`, `ping_on_call_engineer`, `subagent`, `subagents`, `start_session` and `handoff`. `readOnly` removes the nine that write: `bash`, `write`, `edit`, `update_state`, `run_durable_job`, `ping_on_call_engineer`, `subagent`, `subagents` and `start_session`. `GET .../agents/:a` lists each tool with its replay policy and whether it is offered.
+
+## Parallel subagents
+
+The `subagents` tool runs persistent child conversations in parallel. `subagent` remains the foreground, call-owned tool and is unchanged.
+
+| Action | Body | Meaning |
+|---|---|---|
+| `spawn` | `{name, task, concurrency?}` | Create one child, queue its first task, and return at once |
+| `fanout` | `{tasks:[{name, task}], concurrency?}` | Create several children in spawn order |
+| `send` | `{name, message, followUp?}` | Steer the current work now, or queue a follow-up after its current answer |
+| `status` | `{name?}` | Every child's `queued`, `running`, `idle`, `done` or `failed` status, messages and latest answer, plus the in-flight count and queue |
+| `wait` | `{names?, timeoutMs?}` | Join all (or named) children in spawn order, drain the durable queue, and return their latest answers |
+| `stop` | `{name}` | Abort the child's current work; the child stays usable |
+| `results` | `{names?}` | Latest answers without waiting |
+
+**Durability boundary.** A child is a conversation owned by its own background anchor task (`dpi.subagent-anchor`), not by the parent tool call. The parent's Esc, idle wait or turn ending stops at the anchor, so the child keeps working. Each message is delivered by a background reporter task (`dpi.subagent-reporter`) that posts the answer back to the parent as one follow-up. The tool call and the reporter use deterministic request IDs, so a backend restart neither delivers a message twice nor reports an answer twice.
+
+**Registry.** The conversation document `dpi.subagents` (readable at `GET .../agents/:a/docs/dpi.subagents`) holds names → conversation ids, message and reporter task ids, reported assistant entry IDs, latest answers and the spawn queue. Forks start with an empty registry; a child cannot spawn more subagents because both `subagents` and `subagent` are removed from its tool selection.
+
+**Limits.** Four children run at once by default; `concurrency` may lower that per call, and eight is the hard cap. Excess spawns wait in the durable queue, `status` exposes the queue, and `wait` drains it. A child's failure is recorded on that child (`failed`, with the error) and settles `wait`; it does not abort its siblings. `wait` returns a partial `waiting` result with `timedOut: true` after `timeoutMs` (default 300000, maximum 900000).
+
+**Replay.** The tool is replay-safe: spawn and send record request keys, stop records its key, and `status`/`results`/`wait` only read or drain durable state. A replayed call therefore finds the existing child, message or stop instead of repeating a side effect.
 
 ## Durable jobs
 

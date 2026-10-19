@@ -7,8 +7,11 @@
 //   "check:[ <task id>|<job id>]" → one check_durable_job call
 //   "search: <words>" → one search_history call
 //   "page: <summary>" → one ping_on_call_engineer call
+//   "subagents: <json>" → one subagents call with those arguments
+//   "fail: <message>" → a failed model response (for a failing child)
 //   "Release check: …" (the release-check job's subagent) → one bash call
 //   anything else  → "Echo: <text>"
+// A parent also receives subagent reports; it acknowledges them without starting more work.
 import type { MutableModels } from "@earendil-works/pi-ai/models";
 import {
   fauxAssistantMessage,
@@ -69,6 +72,14 @@ export function installFaux(models: MutableModels) {
     }
     if (prompt.startsWith("search:")) return call("search_history", { query: prompt.slice(7).trim() });
     if (prompt.startsWith("page:")) return call("ping_on_call_engineer", { summary: prompt.slice(5).trim() });
+    if (prompt.startsWith("subagents:"))
+      return call("subagents", JSON.parse(prompt.slice(10).trim()) as Parameters<typeof fauxToolCall>[1]);
+    if (prompt.startsWith("[subagent ")) return fauxAssistantMessage(fauxText("Noted."));
+    if (prompt.startsWith("fail:"))
+      return fauxAssistantMessage(fauxText(prompt.slice(5).trim()), {
+        stopReason: "error",
+        errorMessage: prompt.slice(5).trim() || "Deliberate failure",
+      });
     if (prompt.startsWith("Release check:"))
       return call("bash", { command: "git log --oneline -5 2>/dev/null || echo 'no git history'; ls | head -5" });
     if (prompt.startsWith("slow:")) return fauxAssistantMessage(fauxText(prompt.slice(5).trim().repeat(4)));

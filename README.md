@@ -150,13 +150,17 @@ Every agent and session on a device shares one JSON document through the `read_s
 
 A durable job is a repeatable workflow with named phases, and every phase is a checkpoint, so a restart resumes the current phase. Run one from the Tasks tab, or let the agent call `run_durable_job` and follow it with `check_durable_job`. Three ship as examples: `workspace-snapshot`, `change-watch` and `release-check`, where a subagent gathers the evidence and the job waits for a person before it publishes. You are not stuck in the loop and not out of it. **You are near the loop**, and you step in when a job asks for you.
 
+### Parallel subagents: the turn ends, the work does not
+
+The `subagents` tool spawns named child conversations and fans them out. Each child is owned by a background anchor task, not by the tool call that created it, so your Esc key, an idle wait or the parent turn ending never stops it. Each message is delivered by a background reporter task with stable request IDs: a restart cannot send the message twice or report the answer twice. The registry document `dpi.subagents` maps names to conversations, messages and reported entry IDs, and `status` shows `queued`, `running`, `idle`, `done` or `failed`. Four children run at once by default and eight is the hard cap; extra spawns wait in the durable queue, and `wait` joins in spawn order while draining it. `send` steers a busy child or queues a follow-up, `stop` aborts only its current work, and a failed child settles as `failed` instead of hanging the join. Children cannot start more subagents. The legacy foreground `subagent` tool is unchanged.
+
 ### Change the tools mid-run
 
 <p align="center">
-  <img src="images/12_tools_change_mid_run.svg" alt="With Read only on, the 8 tools that write leave the agent's tool set and its next request sees the 6 that only read" width="780">
+  <img src="images/12_tools_change_mid_run.svg" alt="With Read only on, the 9 tools that write leave the agent's tool set and its next request sees the 6 that only read" width="780">
 </p>
 
-Every model call and every tool call is its own durable task, so the agent's tool set can change between requests. The Tools tab lists each tool with its signature and replay policy. Flip **Read only** and the 8 tools that write (`bash`, `write`, `edit`, `update_state` and the rest) leave the agent's next request, leaving the 6 that only read. Model and thinking level change the same way, and so do instructions through the API.
+Every model call and every tool call is its own durable task, so the agent's tool set can change between requests. The Tools tab lists each tool with its signature and replay policy. Flip **Read only** and the 9 tools that write (`bash`, `write`, `edit`, `update_state` and the rest) leave the agent's next request, leaving the 6 that only read. Model and thinking level change the same way, and so do instructions through the API.
 
 ### Extensions
 

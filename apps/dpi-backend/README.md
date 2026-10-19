@@ -226,6 +226,7 @@ state.
 ## Guarantees and boundaries
 
 - Closing a client never stops work. A backend restart resumes unfinished tasks from their checkpoints. Replay-safe tools may rerun, and unsafe ones return an interrupted result.
+- Parallel `subagents` children outlive the parent turn: each is owned by a background anchor task, and each message by a background reporter task. Answers are reported once, a restart cannot deliver a message twice, and at most four children run at once by default (hard cap eight). The registry is the conversation document `dpi.subagents`.
 - A token holder has the agent's shell and filesystem access on that device. Start dirs are where sessions begin, not a sandbox.
 - macOS `ssh` devices run as a LaunchAgent in the logged-in session, so enable auto-login for unattended reboots. Agents working under `~/Documents` need Full Disk Access for the node binary.
 - LAN `ssh` devices speak plain HTTP, so the token crosses the LAN in cleartext. exe.dev devices use HTTPS.
@@ -269,5 +270,5 @@ curl -s "$U/v1/sessions/oneshot/agents/main/messages" "${H[@]}" \
 ```bash
 npm run dev     # restart on file changes (just backend dev)
 npm run check   # strict types, including the pi-durable ↔ SDK wire contract check
-npm test        # api, streams, store (jobs, start_session, extensions, read only), search_history, shared state and SIGKILL recovery (faux provider, no network)
+npm test        # api, streams, store (jobs, start_session, subagents, extensions, read only), search_history, shared state and SIGKILL recovery (faux provider, no network)
 ```
