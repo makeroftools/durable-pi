@@ -235,8 +235,15 @@ just net deploy <id>     # ssh and exe-dev: rsync code, npm ci and restart; data
 just net logs <id>       # tail the service log
 just net restart <id>    # restart the service
 just net rotate <id>     # new token on the device, then re-register
+just net reconcile [id]  # compare declared code_dir with deviceInfo().codeDir; refresh a stale row
+just net services status # backend :4780, hub :4781 and cbp-agent :8790, one deterministic row each
+just net services up     # install/start the backend and hub units, then just net up cbp-agent
 just net destroy <id>    # exe-dev only; asks first; refuses VMs not in the YAML
 ```
+
+The local backend and hub run as systemd user services (`Restart=always`, logs in
+`~/.dpi/*.log`); [`docs/services.md`](docs/services.md) covers install, start/stop,
+logs, restart survival, re-registration and rollback.
 
 Every line of a device's `~/.dpi/backend.env` traces to the YAML: `DPI_PORT`, `DPI_HOST` and `DPI_START_DIRS` from `port`, `host` and `start_dirs`, secrets named in `env_keys` for `kind: local` (values read from your `.env`), plain settings from `env`, the device id as `DPI_DEVICE_NAME`, and a `DPI_TOKEN` generated on the first `up`. `env_keys` is refused on any remote device, because a copy read from your `.env` would sit in that device's `backend.env` where its agents can read it; a remote device keeps its model credential in its own OpenBao vault (`env: { DPI_SECRETS: openbao }`) instead, so the central key never travels over the LAN. New sessions start in `start_dirs` (default `~/dpi-work`, created if missing), and any existing folder on the device works as a session's working directory. The hub classifies each device as `online`, `checking`, `offline`, `unauthorized`, `mismatch` (the URL now answers with a different device identity) or `incompatible`. An offline device keeps its last tree, dimmed, with the exact terminal fix for its kind.
 

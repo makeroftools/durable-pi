@@ -26,6 +26,10 @@ dev *ARGS:
 build:
     npm run build
 
+# Manage the hub as a systemd user service (install|uninstall|start|stop|restart|status|logs|print)
+service *ARGS:
+    npm run service -- "$@"
+
 # Open the web UI in the browser
 open:
     open http://localhost:{{ port }}

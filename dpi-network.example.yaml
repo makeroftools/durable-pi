@@ -65,3 +65,16 @@ devices:
   #   vm: my-dpi-vm-1                # VM name, also the public host: https://my-dpi-vm-1.exe.xyz
   #   create: { cpu: 2, memory: 4GB, disk: 20GB }
   #   start_dirs: ["~/work"]
+
+  # A CBP coding agent exposed as a durable-pi `/v1` device (kind: url).
+  # The token is read from CBP_DEVICE_TOKEN by `just net up cbp-agent`; it never lives here.
+  # Declare code_dir/home_dir explicitly for a url device: they are the operator's truth, and
+  # `just net reconcile cbp-agent` compares code_dir with the device's deviceInfo().codeDir.
+  # cbp-agent:
+  #   name: CBP Agent
+  #   kind: url
+  #   url: http://127.0.0.1:8790
+  #   token_env: CBP_DEVICE_TOKEN
+  #   code_dir: /home/me/cbp-workspace/github/cbp-pro-next
+  #   home_dir: ~/.dpi
+  #   start_dirs: ["~/.dpi/dpi-workdir"]

@@ -6,11 +6,16 @@ set positional-arguments
 set working-directory := "../../apps/dpi-sdk"
 
 net := "NODE_NO_WARNINGS=1 npx tsx scripts/net.ts"
+services := "NODE_NO_WARNINGS=1 ./node_modules/.bin/tsx scripts/services.ts"
 
 # List device commands
 [default]
 default:
     @just --list net
+
+# The local topology: backend + hub + cbp-agent (status|up|down|restart)
+services *ARGS:
+    {{ services }} "$@"
 
 # Probe every device, or one
 status *DEVICE:
@@ -48,6 +53,10 @@ down DEVICE:
 # New token on a device, then re-register
 rotate DEVICE:
     {{ net }} rotate "$1"
+
+# Compare declared code_dir with each device's report; refresh a stale registry row
+reconcile *DEVICE:
+    {{ net }} reconcile "$@"
 
 # Check healthz 200 and tokenless 401
 probe DEVICE:

@@ -11,7 +11,8 @@
     "build": "vue-tsc --noEmit -p apps/dpi-playground-fe/tsconfig.json && tsc --noEmit -p apps/dpi-playground-hub/tsconfig.json && vite build --config apps/dpi-playground-fe/vite.config.ts",
     "lint": "oxlint apps tests",
     "fmt": "oxfmt apps tests",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "service": "tsx scripts/hub-service.ts"
   },
   "dependencies": {
     "dompurify": "^3.2.0",

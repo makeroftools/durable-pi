@@ -212,6 +212,15 @@ export class NetworkRegistry {
     this.db.prepare("UPDATE devices SET device_uid=NULL WHERE id=?").run(id);
   }
 
+  /** Forget the last report (identity caches, tree and status) after the config declares a different checkout. */
+  forgetInfo(id: string) {
+    this.db
+      .prepare(
+        "UPDATE devices SET last_info_json=NULL, last_tree_json=NULL, last_error=NULL, last_seen_at=NULL, last_status='checking' WHERE id=?",
+      )
+      .run(id);
+  }
+
   recordStatus(
     id: string,
     patch: {

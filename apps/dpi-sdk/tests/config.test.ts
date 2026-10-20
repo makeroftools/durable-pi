@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_START_DIR, parseNetworkConfig, syncConfigToRegistry } from "../src/node/config.js";
+import { DEFAULT_START_DIR, parseNetworkConfig, sameCodeDir, syncConfigToRegistry } from "../src/node/config.js";
 import { NetworkRegistry } from "../src/node/registry.js";
 
 test("dpi-network.example.yaml parses: defaults plus the local device", () => {
@@ -71,6 +71,61 @@ test("sync upserts config devices, keeps UI devices and prunes removed config de
     assert.deepEqual(reg.list().map((d) => [d.id, d.source]).sort(), [["adhoc", "ui"], ["one", "config"], ["two", "config"]]);
     syncConfigToRegistry(parseNetworkConfig("devices:\n  one:\n    kind: url\n    url: http://one"), reg);
     assert.deepEqual(reg.list().map((d) => d.id).sort(), ["adhoc", "one"]);
+  } finally {
+    reg.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a declared code_dir clears a stale report, keeps a matching one and never guesses a remote home", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dpi-reconcile-"));
+  const reg = new NetworkRegistry(join(dir, "n.sqlite"));
+  const info = (codeDir: string) => ({
+    uid: "uid-1",
+    name: "cbp",
+    hostname: "denali",
+    platform: "linux",
+    apiVersion: 1 as const,
+    durableVersion: "x",
+    startedAt: 1,
+    startDirs: ["/w"],
+    models: [],
+    defaultModel: "m",
+    storage: { dataDir: "/d", catalogPath: "/c", appStatePath: "/a" },
+    codeDir,
+    capabilities: ["events"] as Array<"events" | "docs" | "demo" | "jobs">,
+  });
+  try {
+    const real = parseNetworkConfig(
+      "devices:\n  cbp:\n    kind: url\n    url: http://cbp:8790\n    code_dir: /real/cbp",
+    );
+    assert.equal(real.devices.cbp.codeDirDeclared, true);
+    syncConfigToRegistry(real, reg);
+    reg.recordStatus("cbp", { status: "online", info: info("/stale/cbp") });
+    // The last report disagrees with the YAML: forget it so the next probe replaces it.
+    syncConfigToRegistry(real, reg);
+    assert.equal(reg.get("cbp")!.lastInfo, null);
+    assert.equal(reg.get("cbp")!.lastStatus, "checking");
+    // A matching report survives a sync.
+    reg.recordStatus("cbp", { status: "online", info: info("/real/cbp") });
+    syncConfigToRegistry(real, reg);
+    assert.equal(reg.get("cbp")!.lastInfo!.codeDir, "/real/cbp");
+    // An undeclared default is not truth; it never clears what the device reported.
+    const implicit = parseNetworkConfig("devices:\n  cbp:\n    kind: url\n    url: http://cbp:8790");
+    assert.equal(implicit.devices.cbp.codeDirDeclared, false);
+    // An inherited defaults.code_dir is a deploy target, not truth about a local checkout.
+    const inherited = parseNetworkConfig("defaults:\n  code_dir: ~/dpi\ndevices:\n  here:\n    kind: local");
+    assert.equal(inherited.devices.here.codeDirDeclared, false);
+    assert.equal(inherited.devices.here.codeDir, "~/dpi");
+    reg.recordStatus("cbp", { status: "online", info: info("/anything") });
+    syncConfigToRegistry(implicit, reg);
+    assert.equal(reg.get("cbp")!.lastInfo!.codeDir, "/anything");
+    // `~` is this machine's home for local/url, but a remote home is not ours to guess.
+    assert.equal(sameCodeDir("~/cbp", "/home/op/cbp", "url", "/home/op"), true);
+    assert.equal(sameCodeDir("~/cbp", "/home/op/cbp", "local", "/home/op"), true);
+    assert.equal(sameCodeDir("~/cbp", "/home/other/cbp", "ssh", "/home/op"), true);
+    assert.equal(sameCodeDir("/real/cbp/", "/real/cbp", "url"), true);
+    assert.equal(sameCodeDir("/real/cbp", "/stale/cbp", "url"), false);
   } finally {
     reg.close();
     await rm(dir, { recursive: true, force: true });

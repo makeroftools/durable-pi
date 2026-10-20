@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import type { DeviceKind } from "../api.js";
 import { DpiClient } from "../client.js";
-import { syncConfigToRegistry, type NetDevice, type NetworkConfig } from "./config.js";
+import { sameCodeDir, syncConfigToRegistry, type NetDevice, type NetworkConfig } from "./config.js";
 import { NetworkRegistry } from "./registry.js";
 import { exeDev, q, remote, rsync, run, shPath, sleep } from "./ops.js";
 
@@ -223,6 +223,16 @@ async function register(device: NetDevice, ctx: DriverContext) {
   ctx.log(`register ${device.id}: token stored in ${ctx.registry.path}`);
 }
 
+/** A declared code_dir is the operator's truth: an `up` that comes online on another checkout is a bug. */
+export function assertCodeDir(device: NetDevice, reported?: string) {
+  if (!device.codeDirDeclared || !reported) return;
+  if (!sameCodeDir(device.codeDir, reported, device.kind))
+    throw Error(
+      `${device.id}: declares code_dir ${device.codeDir} but the device reports ${reported}; ` +
+        `fix dpi-network.yaml or run: just net reconcile ${device.id}`,
+    );
+}
+
 export async function waitOnline(device: NetDevice, ctx: DriverContext, timeoutMs = 90_000) {
   const token = ctx.registry.get(device.id)?.token;
   if (!token) throw Error(`${device.id} has no token; run: just net register ${device.id}`);
@@ -230,14 +240,18 @@ export async function waitOnline(device: NetDevice, ctx: DriverContext, timeoutM
   const end = Date.now() + timeoutMs;
   let last = "";
   while (Date.now() < end) {
+    let info;
     try {
-      const info = await client.device({ timeoutMs: 5000 });
-      ctx.log(`online ${device.id}: ${device.url} (${info.name}, uid ${info.uid}, ${info.models.length} models)`);
-      return info;
+      info = await client.device({ timeoutMs: 5000 });
     } catch (e) {
       last = (e as Error).message;
       await sleep(2000);
+      continue;
     }
+    // A mismatch is not transient: fail now instead of retrying a wrong checkout for the whole timeout.
+    assertCodeDir(device, info.codeDir);
+    ctx.log(`online ${device.id}: ${device.url} (${info.name}, uid ${info.uid}, ${info.models.length} models)`);
+    return info;
   }
   throw Error(`${device.id} did not come online at ${device.url}: ${last}`);
 }

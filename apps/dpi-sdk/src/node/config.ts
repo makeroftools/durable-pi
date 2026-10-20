@@ -1,5 +1,6 @@
 // Load dpi-network.yaml: the declared devices of a Durable Agent Network.
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parse } from "yaml";
 import type { DeviceKind } from "../api.js";
@@ -19,6 +20,8 @@ export interface NetDevice {
   port: number;
   node: number;
   codeDir: string;
+  /** True when this device entry sets `code_dir`; an inherited `defaults.code_dir` is not declared truth. */
+  codeDirDeclared: boolean;
   homeDir: string;
   /** Bind address written as DPI_HOST: 127.0.0.1 for local devices, 0.0.0.0 otherwise. */
   host: string;
@@ -107,6 +110,7 @@ export function parseNetworkConfig(text: string, file = NETWORK_FILE): NetworkCo
       port,
       node: Number(d.node ?? 24),
       codeDir: typeof d.code_dir === "string" ? d.code_dir : "~/dpi",
+      codeDirDeclared: typeof (value as Raw).code_dir === "string",
       homeDir: typeof d.home_dir === "string" ? d.home_dir : "~/.dpi",
       startDirs: d.start_dirs === undefined ? [DEFAULT_START_DIR] : strList(d.start_dirs, `${where}.start_dirs`),
       host: d.host === undefined ? (kind === "local" ? "127.0.0.1" : "0.0.0.0") : str(d.host, `${where}.host`),
@@ -170,7 +174,28 @@ export function tryLoadNetworkConfig(start?: string): NetworkConfig | undefined 
   return file ? parseNetworkConfig(readFileSync(file, "utf8"), file) : undefined;
 }
 
-/** Upsert config devices into the registry (source: config) and drop config devices removed from the file. */
+/**
+ * Compare a declared `code_dir` with what a device reports in `deviceInfo().codeDir`.
+ * A `~` is this machine's home only for local/url devices; a remote home is not ours to guess, so an
+ * unexpanded remote `~/...` is treated as consistent instead of forcing a false mismatch.
+ */
+export function sameCodeDir(
+  declared: string,
+  reported: string,
+  kind: NetDevice["kind"],
+  home = homedir(),
+): boolean {
+  if (declared.startsWith("~") && kind !== "local" && kind !== "url") return true;
+  const full = declared === "~" ? home : declared.startsWith("~/") ? join(home, declared.slice(2)) : declared;
+  return resolve(full) === resolve(reported);
+}
+
+/**
+ * Upsert config devices into the registry (source: config) and drop config devices removed from the file.
+ * A declared `code_dir` is the operator's truth: when the row still carries a different reported checkout
+ * (an offline device, a moved repo), forget that cache so the next probe replaces it. The row never keeps
+ * a stale `codeDir` after the YAML and the registry disagree.
+ */
 export function syncConfigToRegistry(config: NetworkConfig, registry: NetworkRegistry) {
   Object.values(config.devices).forEach((device, position) => {
     const token = device.tokenEnv ? process.env[device.tokenEnv] : undefined;
@@ -183,6 +208,9 @@ export function syncConfigToRegistry(config: NetworkConfig, registry: NetworkReg
       position,
       ...(token ? { token } : {}),
     });
+    const reported = registry.get(device.id)?.lastInfo?.codeDir;
+    if (device.codeDirDeclared && reported && !sameCodeDir(device.codeDir, reported, device.kind))
+      registry.forgetInfo(device.id);
   });
   registry.pruneConfig(Object.keys(config.devices));
 }
