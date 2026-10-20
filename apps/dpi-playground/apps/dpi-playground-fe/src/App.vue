@@ -13,6 +13,7 @@ import {
   Database,
   GitFork,
   Activity,
+  Factory as FactoryIcon,
 } from "lucide-vue-next";
 import NetworkSidebar from "./components/NetworkSidebar.vue";
 import AgentView from "./components/AgentView.vue";
@@ -51,6 +52,8 @@ const onlineCount = computed(
   () => network.devices.value.filter((d) => d.status === "online").length,
 );
 const creatingAgent = ref(false);
+// The CBP control room is a separate read-only service on the same host.
+const factoryHref = `${location.protocol}//${location.hostname || "127.0.0.1"}:8766/factory/`;
 
 async function newAgent() {
   const handle = sessionHandle.value;
@@ -165,6 +168,15 @@ onBeforeUnmount(() => {
         <button class="secondary small" @click="ui.dialog = { kind: 'fleet' }">
           <Activity :size="18" />Fleet
         </button>
+        <a
+          class="secondary small factory-link"
+          :href="factoryHref"
+          target="_blank"
+          rel="noopener"
+          title="Open the CBP factory control room"
+        >
+          <FactoryIcon :size="18" />Factory
+        </a>
         <button
           class="icon-button inspector-toggle"
           aria-label="Toggle inspector"
