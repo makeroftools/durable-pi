@@ -854,13 +854,24 @@ export class Store {
       cwd = (await this.browse(body.cwd)).path;
     }
     if (body.readOnly !== undefined && typeof body.readOnly !== "boolean") throw invalid("readOnly must be a boolean");
-    // Read only filters the agent's tools: the model is never offered the ones that create, update or delete.
+    let toolsRemove: string[] | undefined;
+    if (body.toolsRemove !== undefined) {
+      if (!Array.isArray(body.toolsRemove) || body.toolsRemove.length > 64 ||
+          body.toolsRemove.some((name) => typeof name !== "string" || !name.trim()))
+        throw invalid("toolsRemove must be a list of up to 64 non-empty tool names");
+      toolsRemove = [...new Set(body.toolsRemove as string[])];
+    }
+    // Read only filters every writer. A delegate-only agent can remove individual
+    // writers (for example bash/edit) while keeping `subagents`.
+    const allTools = (await this.toolsOf(c)).all;
     const tools =
       body.readOnly === true
-        ? { tools: { remove: (await this.toolsOf(c)).all.filter((t) => WRITE_TOOLS.has(t.name)) } }
+        ? { tools: { remove: allTools.filter((t) => WRITE_TOOLS.has(t.name)) } }
         : body.readOnly === false
           ? { tools: null }
-          : {};
+          : toolsRemove
+            ? { tools: { remove: allTools.filter((t) => toolsRemove.includes(t.name)) } }
+            : {};
     await c.configure(
       {
         ...tools,
