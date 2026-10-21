@@ -253,6 +253,18 @@ test("read only: the agent is offered only tools that read; turning it off resto
     assert.ok((await offered()).includes("bash"));
     assert.equal((await store.agentDetail(row, c)).config.readOnly, false);
 
+    const labeled = await store.send(c, {
+      content: "!echo labeled",
+      requestId: "label-1",
+      label: "dispatcher",
+    });
+    assert.equal((await store.settled(h, labeled.id as number, 20000)).status, "done");
+    assert.match(JSON.stringify(await store.entries(c, undefined, 50)), /\[from: dispatcher\]/);
+    await assert.rejects(
+      () => store.send(c, { content: "x", requestId: "label-2", label: "bad\nname" }),
+      /label/,
+    );
+
     // Delegate-only: keep background subagents, remove every local writer.
     await store.configure(row, c, {
       toolsRemove: ["bash", "write", "edit", "update_state", "subagent", "start_session"],

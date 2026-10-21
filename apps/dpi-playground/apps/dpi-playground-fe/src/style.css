@@ -1048,6 +1048,30 @@ svg {
   color: #f2eeee;
   padding: 4px;
 }
+.speaker-field {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 40px;
+  padding: 6px 9px;
+  border: 1px solid #443738;
+  border-radius: 8px;
+  background: #2b2021;
+  color: var(--muted);
+  font-size: 15px;
+}
+.speaker-field input {
+  width: 92px;
+  border: 0;
+  background: none;
+  color: #f8eeee;
+  font: inherit;
+  padding: 0;
+  outline: none;
+}
+.speaker-field:focus-within {
+  border-color: #77515a;
+}
 .interrupt {
   color: #f2eeee;
   font-size: 16px;

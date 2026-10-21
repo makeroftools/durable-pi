@@ -263,6 +263,8 @@ export interface SendMessageBody {
   whenBusy?: WhenBusy;
   requestId: string;
   waitMs?: number;
+  /** Optional human label; the backend prefixes the input with `[from: <label>]`. */
+  label?: string;
 }
 
 export type SendResult =

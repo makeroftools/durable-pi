@@ -18,6 +18,12 @@ import {
 
 const mode = ref<WhenBusy>("followUp");
 const pending = ref(false);
+const speaker = ref((localStorage.getItem("dpi.speaker") ?? "operator").trim() || "operator");
+watch(speaker, (value) => {
+  const clean = value.trim() || "operator";
+  if (clean !== value) speaker.value = clean;
+  else localStorage.setItem("dpi.speaker", clean);
+});
 
 // Typing "/" lists the slash commands; arrows pick, Tab or Enter completes.
 const menuIndex = ref(0);
@@ -98,7 +104,7 @@ async function send() {
     JSON.stringify({ key, content, mode: mode.value, requestId }),
   );
   await attempt(async () => {
-    await handle.send(content, mode.value, requestId);
+    await handle.send(content, mode.value, requestId, undefined, speaker.value.trim() || "operator");
     sessionStorage.removeItem("dpi.pending-send");
     ui.composer = "";
   });
@@ -151,6 +157,15 @@ function withdraw(id: number) {
       />
       <div class="composer-toolbar">
         <div class="composer-left">
+          <label class="speaker-field" title="Messages are labelled with this name">
+            <span>as</span>
+            <input
+              v-model="speaker"
+              maxlength="40"
+              aria-label="Speaking as"
+              placeholder="operator"
+            />
+          </label>
           <div class="queue-mode">
             <select
               v-model="mode"

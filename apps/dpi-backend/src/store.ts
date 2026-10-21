@@ -901,7 +901,14 @@ export class Store {
     if (!["steer", "followUp", "reject"].includes(whenBusy)) throw invalid("whenBusy must be followUp, steer or reject");
     if (typeof body.requestId !== "string" || !body.requestId || body.requestId.length > 128)
       throw invalid("requestId is required (≤128 chars) so retries never submit twice");
-    return c.submit({ type: "input", content: body.content, requestId: body.requestId, whenBusy }, ctx);
+    if (typeof body.content !== "string" || !body.content.trim()) throw invalid("content is required");
+    let content = body.content;
+    if (body.label !== undefined) {
+      if (typeof body.label !== "string" || !/^[A-Za-z0-9][A-Za-z0-9 ._:-]{0,39}$/.test(body.label))
+        throw invalid("label must be 1..40 safe characters");
+      content = `[from: ${body.label}]\n${body.content}`;
+    }
+    return c.submit({ type: "input", content, requestId: body.requestId, whenBusy }, ctx);
   }
 
   async settled(h: Harness, submissionId: number, waitMs = 0, signal?: AbortSignal): Promise<SendResult> {
