@@ -7,7 +7,7 @@
 // The check exercises the code the backend uses, not a copy of it: the path guard refuses an out-of-root
 // secret, and a namespace run proves the working directory is reachable while the outside is not. Fail-closed:
 // an off/unavailable mechanism is a named refusal (rc 1), never a skip and never a zero. The negative proof
-// includes the real agent credential and a sibling directory; neither content is ever printed.
+// includes the real agent credential and a directory outside the roots; neither content is ever printed.
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -70,10 +70,10 @@ const work = join(root, "work");
 await mkdir(work, { recursive: true });
 const secret = join(root, "secret.txt");
 await writeFile(secret, "classified", "utf8");
-const sibling = join(root, "sibling");
-await mkdir(sibling, { recursive: true });
-const siblingSecret = join(sibling, "secret.txt");
-await writeFile(siblingSecret, "sibling-classified", "utf8");
+const outside = join(root, "outside");
+await mkdir(outside, { recursive: true });
+const outsideSecret = join(outside, "secret.txt");
+await writeFile(outsideSecret, "outside-classified", "utf8");
 const auth = join(homedir(), ".pi/agent/auth.json");
 const container = `dpi-sbx-check-${process.pid}`;
 const roots = [work, ...settings.extraRoots];
@@ -117,16 +117,17 @@ try {
   const canary = await exec(`pwd; if cat '${secret}' >/dev/null 2>&1; then echo LEAKED; else echo CONTAINED; fi`);
   expect(canary.ok, "the shell runs in the sandbox");
   expect(canary.out.includes(work), "the sandbox sees the working directory");
-  expect(canary.out.includes("CONTAINED") && !canary.out.includes("LEAKED"), "the sandbox cannot read a sibling temp file");
+  expect(canary.out.includes("CONTAINED") && !canary.out.includes("LEAKED"), "the sandbox cannot see a path outside its roots");
 
-  // Negative proof: the real credential and a sibling directory. stdout is /dev/null, so a broken sandbox
-  // yields `rc=0` but never the file's bytes. stderr is the OS refusal, quoted as-is.
+  // Negative proof: the real credential and a directory outside the roots. The probe proves those paths are
+  // absent from the confined mount namespace; it does not prove that a mounted path was denied. stdout is
+  // /dev/null, so a broken sandbox yields `rc=0` but never the file's bytes. stderr is quoted as-is.
   const authProbe = await exec(`cat '${auth}' >/dev/null; echo "auth_rc=$?"`);
-  const siblingProbe = await exec(`cat '${siblingSecret}' >/dev/null; echo "sibling_rc=$?"`);
-  expect(authProbe.ok && !authProbe.out.includes("auth_rc=0"), `the sandbox cannot read ${auth}`);
-  expect(siblingProbe.ok && !siblingProbe.out.includes("sibling_rc=0"), "the sandbox cannot read a sibling worktree");
-  line(!authProbe.out.includes("auth_rc=0"), `auth refusal: ${authProbe.out.trim().split("\n").filter((l) => l.includes("cat:") || l.includes("auth_rc=")).join(" | ")}`);
-  line(!siblingProbe.out.includes("sibling_rc=0"), `sibling refusal: ${siblingProbe.out.trim().split("\n").filter((l) => l.includes("cat:") || l.includes("sibling_rc=")).join(" | ")}`);
+  const outsideProbe = await exec(`cat '${outsideSecret}' >/dev/null; echo "outside_rc=$?"`);
+  expect(authProbe.ok && !authProbe.out.includes("auth_rc=0"), `the sandbox cannot see ${auth}`);
+  expect(outsideProbe.ok && !outsideProbe.out.includes("outside_rc=0"), "the sandbox cannot see a directory outside its roots");
+  line(!authProbe.out.includes("auth_rc=0"), `auth absence: ${authProbe.out.trim().split("\n").filter((l) => l.includes("cat:") || l.includes("auth_rc=")).join(" | ")}`);
+  line(!outsideProbe.out.includes("outside_rc=0"), `outside-root absence: ${outsideProbe.out.trim().split("\n").filter((l) => l.includes("cat:") || l.includes("outside_rc=")).join(" | ")}`);
 } finally {
   if (settings.mechanism === "docker") await stopSandbox(container).catch(() => {});
   await env?.cleanup(BACKGROUND_CONTEXT).catch(() => {});

@@ -135,18 +135,19 @@ test("sandbox env runs commands in a sandbox that cannot see outside its roots",
   }
 });
 
-// R4: the real credential and a sibling directory, from inside the confined actor. The probe redirects stdout to
-// /dev/null, so a broken sandbox yields `rc=0` but never the bytes. A missing mechanism fails; it never skips.
-test("the confined actor cannot read the agent credential or a sibling worktree", async () => {
+// R4: the real credential and a directory outside the roots, from inside the confined actor. The probe proves
+// those paths are absent from the confined mount namespace; it does not prove that a mounted path was denied.
+// stdout is /dev/null, so a broken sandbox yields `rc=0` but never the bytes. A missing mechanism fails; never skips.
+test("the confined actor cannot see the agent credential or a directory outside its roots", async () => {
   assert.notEqual(settings.mechanism, "none", `sandbox-off: ${settings.reason ?? "no mechanism"}`);
   assert.notEqual(settings.mechanism, "landlock", "sandbox-mechanism-unavailable: landlock is not implemented");
   const auth = join(homedir(), ".pi/agent/auth.json");
   assert.ok(existsSync(auth), `sandbox-negative-proof-unsettleable: ${auth} is not present on the host`);
   const t = await tempStore();
-  const sibling = join(t.root, "sibling");
-  await mkdir(sibling, { recursive: true });
-  const siblingSecret = join(sibling, "secret.txt");
-  await writeFile(siblingSecret, "sibling-classified", "utf8");
+  const outside = join(t.root, "outside");
+  await mkdir(outside, { recursive: true });
+  const outsideSecret = join(outside, "secret.txt");
+  await writeFile(outsideSecret, "outside-classified", "utf8");
   const container = `dpi-sbx-proof-${process.pid}-${Date.now()}`;
   let env: SandboxExecutionEnv | undefined;
   try {
@@ -177,15 +178,15 @@ test("the confined actor cannot read the agent credential or a sibling worktree"
       return { ok: result.ok, out };
     };
     const authProbe = await probe(auth);
-    const siblingProbe = await probe(siblingSecret);
+    const outsideProbe = await probe(outsideSecret);
     assert.ok(authProbe.ok);
-    assert.ok(siblingProbe.ok);
-    assert.ok(!authProbe.out.includes("rc=0"), `agent credential was readable: ${authProbe.out}`);
-    assert.ok(!siblingProbe.out.includes("rc=0"), `sibling worktree was readable: ${siblingProbe.out}`);
+    assert.ok(outsideProbe.ok);
+    assert.ok(!authProbe.out.includes("rc=0"), `agent credential was visible: ${authProbe.out}`);
+    assert.ok(!outsideProbe.out.includes("rc=0"), `outside-root path was visible: ${outsideProbe.out}`);
     assert.match(authProbe.out, /No such file or directory|Permission denied/);
-    assert.match(siblingProbe.out, /No such file or directory|Permission denied/);
-    assert.doesNotMatch(authProbe.out, /sibling-classified|classified/);
-    assert.doesNotMatch(siblingProbe.out, /sibling-classified|classified/);
+    assert.match(outsideProbe.out, /No such file or directory|Permission denied/);
+    assert.doesNotMatch(authProbe.out, /outside-classified|classified/);
+    assert.doesNotMatch(outsideProbe.out, /outside-classified|classified/);
   } finally {
     if (settings.mechanism === "docker") await stopSandbox(container).catch(() => {});
     await env?.cleanup(BACKGROUND_CONTEXT).catch(() => {});
