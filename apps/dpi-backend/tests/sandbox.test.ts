@@ -1,13 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { symlink, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { SANDBOX_SHELL, SandboxExecutionEnv, sandboxShellEnv, stopSandbox } from "../src/sandbox.js";
-import { tempStore } from "./helpers.js";
+import { SandboxExecutionEnv, sandboxSettings, sandboxShellEnv, sandboxShellPath, stopSandbox } from "../src/sandbox.js";
+import { faux, tempStore } from "./helpers.js";
+
+const settings = sandboxSettings();
 
 const guardEnv = (work: string) =>
-  new SandboxExecutionEnv({ cwd: work, roots: [work], shellPath: "/bin/true", container: "dpi-test-unused" });
+  new SandboxExecutionEnv({ mechanism: "docker", cwd: work, roots: [work], shellPath: "/bin/true", container: "dpi-test-unused" });
 
 test("sandbox env confines filesystem operations to its roots, symlinks included", async () => {
   const t = await tempStore();
@@ -41,7 +45,7 @@ test("sandbox env confines filesystem operations to its roots, symlinks included
 test("an extra root that overlaps the working root is refused, not silently shadowed", async () => {
   const t = await tempStore();
   try {
-    const base = { cwd: t.work, shellPath: "/bin/true", container: "dpi-test-unused" };
+    const base = { mechanism: "docker" as const, cwd: t.work, shellPath: "/bin/true", container: "dpi-test-unused" };
     // An ancestor of the cwd is mounted read-only after it and would shadow the write.
     assert.throws(
       () => new SandboxExecutionEnv({ ...base, roots: [t.work, t.root] }),
@@ -56,20 +60,62 @@ test("an extra root that overlaps the working root is refused, not silently shad
   }
 });
 
-// Requires Docker and an image with bash (default node:24-slim). Opt in: DPI_SANDBOX_TEST=1 npm test.
-test("sandbox env runs commands in a container that cannot see outside its roots", { skip: process.env.DPI_SANDBOX_TEST !== "1" }, async () => {
+test("a declared scope is persisted and used as the sandbox roots", async () => {
+  const t = await tempStore();
+  const store = await t.open();
+  try {
+    const readDir = join(t.root, "read");
+    await mkdir(readDir, { recursive: true });
+    await writeFile(join(readDir, "read.txt"), "read-ok", "utf8");
+    const session = await store.create({
+      name: "Scope",
+      cwd: t.work,
+      model: faux,
+      scope: { read: [readDir], write: [t.work], extra: [] },
+    });
+    const row = store.list().find((r) => r.id === session.id);
+    assert.ok(row?.scope, "the declared scope is persisted on the session row");
+    const parsed = JSON.parse(row.scope) as { read: string[]; write: string[] };
+    assert.deepEqual(parsed.write, [t.work]);
+    assert.deepEqual(parsed.read, [readDir]);
+  } finally {
+    await store.close();
+    await t.cleanup();
+  }
+});
+
+test("the configured sandbox mechanism is available", () => {
+  assert.notEqual(settings.mechanism, "none", `sandbox-off: ${settings.reason ?? "no mechanism"}`);
+  assert.notEqual(settings.mechanism, "landlock", "sandbox-mechanism-unavailable: landlock is not implemented");
+});
+
+// The container test runs by default: an unavailable mechanism is a failure, never a skip.
+test("sandbox env runs commands in a sandbox that cannot see outside its roots", async () => {
+  assert.notEqual(settings.mechanism, "none", `sandbox-off: ${settings.reason ?? "no mechanism"}`);
+  assert.notEqual(settings.mechanism, "landlock", "sandbox-mechanism-unavailable: landlock is not implemented");
   const t = await tempStore();
   const container = `dpi-sbx-test-${process.pid}-${Date.now()}`;
+  let env: SandboxExecutionEnv | undefined;
   try {
     const secret = join(t.root, "secret.txt");
     await writeFile(secret, "classified", "utf8");
-    const image = process.env.DPI_SANDBOX_IMAGE ?? "node:24-slim";
-    const env = new SandboxExecutionEnv({
+    env = new SandboxExecutionEnv({
+      mechanism: settings.mechanism,
       cwd: t.work,
       roots: [t.work],
-      shellPath: SANDBOX_SHELL,
+      shellPath: sandboxShellPath(settings.mechanism),
       container,
-      shellEnv: sandboxShellEnv({ container, image, cwd: t.work, roots: [t.work], network: "none", cpus: "2", memory: "2g", pids: 512 }),
+      shellEnv: sandboxShellEnv({
+        mechanism: settings.mechanism,
+        container,
+        image: settings.image,
+        cwd: t.work,
+        roots: [t.work],
+        network: settings.network,
+        cpus: settings.cpus,
+        memory: settings.memory,
+        pids: settings.pids,
+      }),
     });
     let out = "";
     const ctx = BACKGROUND_CONTEXT;
@@ -83,7 +129,66 @@ test("sandbox env runs commands in a container that cannot see outside its roots
     assert.match(out, /MISSING/);
     assert.doesNotMatch(out, /LEAKED|classified/);
   } finally {
-    await stopSandbox(container).catch(() => {});
+    if (settings.mechanism === "docker") await stopSandbox(container).catch(() => {});
+    await env?.cleanup(BACKGROUND_CONTEXT).catch(() => {});
+    await t.cleanup();
+  }
+});
+
+// R4: the real credential and a sibling directory, from inside the confined actor. The probe redirects stdout to
+// /dev/null, so a broken sandbox yields `rc=0` but never the bytes. A missing mechanism fails; it never skips.
+test("the confined actor cannot read the agent credential or a sibling worktree", async () => {
+  assert.notEqual(settings.mechanism, "none", `sandbox-off: ${settings.reason ?? "no mechanism"}`);
+  assert.notEqual(settings.mechanism, "landlock", "sandbox-mechanism-unavailable: landlock is not implemented");
+  const auth = join(homedir(), ".pi/agent/auth.json");
+  assert.ok(existsSync(auth), `sandbox-negative-proof-unsettleable: ${auth} is not present on the host`);
+  const t = await tempStore();
+  const sibling = join(t.root, "sibling");
+  await mkdir(sibling, { recursive: true });
+  const siblingSecret = join(sibling, "secret.txt");
+  await writeFile(siblingSecret, "sibling-classified", "utf8");
+  const container = `dpi-sbx-proof-${process.pid}-${Date.now()}`;
+  let env: SandboxExecutionEnv | undefined;
+  try {
+    env = new SandboxExecutionEnv({
+      mechanism: settings.mechanism,
+      cwd: t.work,
+      roots: [t.work],
+      shellPath: sandboxShellPath(settings.mechanism),
+      container,
+      shellEnv: sandboxShellEnv({
+        mechanism: settings.mechanism,
+        container,
+        image: settings.image,
+        cwd: t.work,
+        roots: [t.work],
+        network: settings.network,
+        cpus: settings.cpus,
+        memory: settings.memory,
+        pids: settings.pids,
+      }),
+    });
+    const ctx = BACKGROUND_CONTEXT;
+    const probe = async (path: string) => {
+      let out = "";
+      const result = await env!.exec(`cat '${path}' >/dev/null; echo "rc=$?"`, {
+        onOutput: (text) => void (out += text),
+      }, ctx);
+      return { ok: result.ok, out };
+    };
+    const authProbe = await probe(auth);
+    const siblingProbe = await probe(siblingSecret);
+    assert.ok(authProbe.ok);
+    assert.ok(siblingProbe.ok);
+    assert.ok(!authProbe.out.includes("rc=0"), `agent credential was readable: ${authProbe.out}`);
+    assert.ok(!siblingProbe.out.includes("rc=0"), `sibling worktree was readable: ${siblingProbe.out}`);
+    assert.match(authProbe.out, /No such file or directory|Permission denied/);
+    assert.match(siblingProbe.out, /No such file or directory|Permission denied/);
+    assert.doesNotMatch(authProbe.out, /sibling-classified|classified/);
+    assert.doesNotMatch(siblingProbe.out, /sibling-classified|classified/);
+  } finally {
+    if (settings.mechanism === "docker") await stopSandbox(container).catch(() => {});
+    await env?.cleanup(BACKGROUND_CONTEXT).catch(() => {});
     await t.cleanup();
   }
 });

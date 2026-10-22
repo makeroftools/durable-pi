@@ -210,6 +210,18 @@ export interface AgentDetail extends AgentSummary {
   extensions: string[];
 }
 
+/**
+ * The filesystem environment a session declares. `write` roots are writable and `read`/`extra` roots are
+ * read-only; relative paths resolve against `cwd`. Omitted means the session cwd alone (the legacy behaviour,
+ * reported as `cwd-default`), never a silent widening to the host.
+ */
+export interface SessionScope {
+  read?: string[];
+  write?: string[];
+  /** Additive read-only roots beyond the declared claims. */
+  extra?: string[];
+}
+
 export interface CreateSessionBody {
   name: string;
   cwd: string;
@@ -219,6 +231,8 @@ export interface CreateSessionBody {
   prompt?: string;
   /** Agent instructions applied before the opening brief. */
   instructions?: string;
+  /** The declared filesystem environment; see {@link SessionScope}. */
+  scope?: SessionScope;
 }
 
 /** The result of a seeded launch: the session, plus how its opening brief and instructions were admitted. */

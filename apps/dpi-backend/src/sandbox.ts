@@ -6,8 +6,9 @@
 // included. The container drops all capabilities, reads no secrets, runs with a read-only root filesystem
 // (only /tmp is writable) and is resource-capped.
 //
-// Disabled by default. Enable with DPI_SANDBOX=docker.
-import { execFile } from "node:child_process";
+// Confinement is required. `DPI_SANDBOX` selects the mechanism (docker, bwrap, landlock); it never selects
+// whether confinement happens. An `off`/unknown value is reported and refuses at exec time, never a silent host.
+import { execFile, execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -28,8 +29,17 @@ import {
   type WatchTarget,
 } from "@earendil-works/pi-durable/env";
 
+export type SandboxMechanism = "docker" | "bwrap" | "landlock" | "none";
+
 export type SandboxSettings = {
+  /** The confinement mechanism. `none` is a refusal state, never a fallback to the host. */
+  mechanism: SandboxMechanism;
+  /** True only when a mechanism is selected. */
   enabled: boolean;
+  /** Why `mechanism` is `none`, when it is. */
+  reason?: string;
+  /** Identifier/version of the mechanism, for `scope.report/v1`. */
+  version: string;
   image: string;
   network: string;
   cpus: string;
@@ -40,7 +50,10 @@ export type SandboxSettings = {
 };
 
 export const SANDBOX_OFF: SandboxSettings = {
+  mechanism: "none",
   enabled: false,
+  reason: "sandbox-off",
+  version: "none",
   image: "",
   network: "none",
   cpus: "0",
@@ -51,11 +64,61 @@ export const SANDBOX_OFF: SandboxSettings = {
 
 /** The wrapper script that turns a shell invocation into `docker exec` in the session's container. */
 export const SANDBOX_SHELL = join(import.meta.dirname, "../scripts/sandbox-shell.sh");
+/** The wrapper script that turns a shell invocation into a bubblewrap namespace. */
+export const SANDBOX_BWRAP_SHELL = join(import.meta.dirname, "../scripts/sandbox-bwrap-shell.sh");
 
-/** The device's sandbox policy, read from the environment. Off unless DPI_SANDBOX=docker. */
+/** The shell wrapper for a mechanism. `none`/`landlock` have no wrapper and are refused by the caller. */
+export function sandboxShellPath(mechanism: SandboxMechanism): string {
+  if (mechanism === "docker") return SANDBOX_SHELL;
+  if (mechanism === "bwrap") return SANDBOX_BWRAP_SHELL;
+  throw new SandboxRefusal("sandbox-mechanism-unavailable", `No shell wrapper for sandbox mechanism ${mechanism}`);
+}
+
+/** A named sandbox refusal. Callers must surface it; it is never a silent host fallback. */
+export class SandboxRefusal extends Error {
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "SandboxRefusal";
+    this.code = code;
+  }
+}
+
+/** The mechanism's own version, best-effort. Never a secret. */
+export function mechanismVersion(mechanism: SandboxMechanism): string {
+  try {
+    if (mechanism === "docker") {
+      const out = execFileSync(process.env.DPI_SANDBOX_DOCKER ?? "docker", ["--version"], { encoding: "utf8", timeout: 5_000 });
+      return out.trim();
+    }
+    if (mechanism === "bwrap") {
+      const out = execFileSync("bwrap", ["--version"], { encoding: "utf8", timeout: 5_000 });
+      return out.trim();
+    }
+  } catch {
+    return "unknown";
+  }
+  return "none";
+}
+
+/** The device's sandbox policy, read from the environment. Unset means `docker` (confinement by default). */
 export function sandboxSettings(env: NodeJS.ProcessEnv = process.env): SandboxSettings {
+  const raw = (env.DPI_SANDBOX ?? "docker").trim().toLowerCase();
+  const mechanism: SandboxMechanism =
+    raw === "" || raw === "docker" ? "docker"
+    : raw === "bwrap" || raw === "bubblewrap" ? "bwrap"
+    : raw === "landlock" ? "landlock"
+    : raw === "off" || raw === "none" || raw === "0" || raw === "false" ? "none"
+    : "none";
+  const reason =
+    mechanism !== "none" ? undefined
+    : raw === "off" || raw === "none" || raw === "0" || raw === "false" ? `DPI_SANDBOX=${raw}`
+    : `unknown DPI_SANDBOX=${raw}`;
   return {
-    enabled: (env.DPI_SANDBOX ?? "off").toLowerCase() === "docker",
+    mechanism,
+    enabled: mechanism !== "none",
+    reason,
+    version: mechanismVersion(mechanism),
     image: env.DPI_SANDBOX_IMAGE ?? "node:24-slim",
     network: env.DPI_SANDBOX_NETWORK ?? "none",
     cpus: env.DPI_SANDBOX_CPUS ?? "2",
@@ -71,6 +134,7 @@ export function sandboxSettings(env: NodeJS.ProcessEnv = process.env): SandboxSe
 
 /** The environment the sandbox shell reads its container, mounts and limits from. Never carries a secret. */
 export function sandboxShellEnv(input: {
+  mechanism: SandboxMechanism;
   container: string;
   image: string;
   cwd: string;
@@ -84,6 +148,7 @@ export function sandboxShellEnv(input: {
   const mounts = input.roots.map((root, index) => `${root}:${root}${index === 0 ? "" : ":ro"}`).join("\n");
   return {
     ...(input.base ?? {}),
+    DPI_SANDBOX_MECHANISM: input.mechanism,
     DPI_SANDBOX_CONTAINER: input.container,
     DPI_SANDBOX_IMAGE: input.image,
     DPI_SANDBOX_WORKDIR: input.cwd,
@@ -122,6 +187,7 @@ const canonical = (path: string): string => {
 };
 
 export type SandboxEnvOptions = {
+  mechanism?: SandboxMechanism;
   cwd: string;
   /** Absolute host roots. The first is the writable working root; the rest are read-only. */
   roots: string[];
@@ -139,6 +205,7 @@ export type SandboxEnvOptions = {
 export class SandboxExecutionEnv extends NodeExecutionEnv {
   private readonly roots: string[];
   private readonly tempRoot: string;
+  private readonly mechanism: SandboxMechanism;
   readonly container: string;
 
   constructor(options: SandboxEnvOptions) {
@@ -156,6 +223,7 @@ export class SandboxExecutionEnv extends NodeExecutionEnv {
         );
     }
     this.container = options.container;
+    this.mechanism = options.mechanism ?? "docker";
     this.tempRoot = join(this.roots[0]!, ".dpi-tmp");
   }
 
@@ -307,7 +375,7 @@ export class SandboxExecutionEnv extends NodeExecutionEnv {
 
   /** Stop the container this environment owns; a later command starts a fresh one. */
   async cleanup(context: Context): Promise<void> {
-    await stopSandbox(this.container).catch(() => {});
+    if (this.mechanism === "docker") await stopSandbox(this.container).catch(() => {});
     return super.cleanup(context);
   }
 }

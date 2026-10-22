@@ -38,8 +38,8 @@ install:
     cd apps/dpi-playground && npm install --no-audit --no-fund
     cd apps/dpi-tui && npm install --no-audit --no-fund
 
-# Type checks and unit tests, every app
-check: test::unit
+# Type checks, unit tests, and the fail-closed sandbox gate (R3: an off mechanism must not be green)
+check: test::unit sandbox::check
 
 # Fail-closed health check of this device's operator harness (env, vault, backend, model credential)
 doctor:

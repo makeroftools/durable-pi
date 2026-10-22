@@ -36,6 +36,12 @@ if [ -n "${DPI_SANDBOX_MOUNTS:-}" ]; then
   done <<< "$DPI_SANDBOX_MOUNTS"
 fi
 
+# A tmpfs at /tmp would shadow any declared root under /tmp. Use a writable subdirectory of the
+# session's working root for HOME/TMPDIR instead, so the root bind mount is never covered.
+home_dir="${DPI_SANDBOX_HOME:-$workdir/.dpi-home}"
+tmp_dir="${DPI_SANDBOX_TMP:-$workdir/.dpi-tmp}"
+mkdir -p "$home_dir" "$tmp_dir"
+
 running="$("$docker_bin" inspect -f '{{.State.Running}}' "$name" 2>/dev/null || true)"
 if [ "$running" != "true" ]; then
   if "$docker_bin" inspect "$name" >/dev/null 2>&1; then
@@ -45,13 +51,13 @@ if [ "$running" != "true" ]; then
       --network "${DPI_SANDBOX_NETWORK:-none}" \
       --cap-drop ALL \
       --security-opt no-new-privileges \
+      --user "$(id -u):$(id -g)" \
       --pids-limit "${DPI_SANDBOX_PIDS:-512}" \
       --memory "${DPI_SANDBOX_MEMORY:-2g}" \
       --cpus "${DPI_SANDBOX_CPUS:-2}" \
       --read-only \
-      --tmpfs "/tmp:rw,nosuid,nodev,size=256m" \
       "${mounts[@]}" \
-      -w "$workdir" -e HOME=/tmp \
+      -w "$workdir" -e HOME="$home_dir" -e TMPDIR="$tmp_dir" \
       "$image" sleep infinity >/dev/null
   fi
 fi

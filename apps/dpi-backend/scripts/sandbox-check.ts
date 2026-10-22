@@ -5,8 +5,9 @@
 //   just sandbox check      run the real SandboxExecutionEnv and verify containment
 //
 // The check exercises the code the backend uses, not a copy of it: the path guard refuses an out-of-root
-// secret, and a container run proves the working directory is reachable while the outside is not. Fail-closed:
-// anything that cannot be verified is a failure, never a pass by default.
+// secret, and a namespace run proves the working directory is reachable while the outside is not. Fail-closed:
+// an off/unavailable mechanism is a named refusal (rc 1), never a skip and never a zero. The negative proof
+// includes the real agent credential and a sibling directory; neither content is ever printed.
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -14,7 +15,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { SANDBOX_SHELL, SandboxExecutionEnv, sandboxSettings, sandboxShellEnv, stopSandbox } from "../src/sandbox.js";
+import { SandboxExecutionEnv, sandboxSettings, sandboxShellEnv, sandboxShellPath, stopSandbox } from "../src/sandbox.js";
 
 const run = promisify(execFile);
 const argv = process.argv.slice(2);
@@ -31,8 +32,8 @@ if (existsSync(envFile)) process.loadEnvFile(envFile);
 const settings = sandboxSettings();
 const line = (ok: boolean, text: string) => console.log(`${ok ? "  ok  " : " FAIL "} ${text}`);
 
-console.log(`sandbox: ${settings.enabled ? "on" : "off"}  (${envFile})`);
-console.log(`  image   ${settings.enabled ? settings.image : "(unused)"}`);
+console.log(`sandbox: ${settings.mechanism} (${settings.enabled ? "on" : "off"})  (${envFile})`);
+console.log(`  image   ${settings.mechanism === "docker" ? settings.image : "(unused)"}`);
 console.log(`  network ${settings.enabled ? settings.network : "(unused)"}`);
 console.log(`  limits  cpus=${settings.cpus} memory=${settings.memory} pids=${settings.pids}`);
 console.log(
@@ -41,22 +42,26 @@ console.log(
 
 if (!settings.enabled) {
   console.log(`
-The sandbox is off: agent commands and file tools are not contained. Enable it in ${envFile}:
-
-  DPI_SANDBOX=docker
-  DPI_SANDBOX_IMAGE=node:24-slim                     # any image with bash; add your toolchain
-  DPI_SANDBOX_NETWORK=bridge                         # needed for git/package registries; none blocks egress
-  DPI_SANDBOX_ROOTS=~/github/cbp/worktrees:~/cbp-worktrees   # extra roots, read-only
-
-Then restart the backend, and run \`just sandbox check\` to verify.`);
-  process.exit(statusOnly ? 0 : 1);
+REFUSED sandbox-off: agent commands and file tools are not contained (${settings.reason ?? "no mechanism"}).
+Confinement is required. Set DPI_SANDBOX=docker|bwrap|landlock in ${envFile}, then restart the backend.`);
+  process.exit(1);
 }
-if (statusOnly) process.exit(0);
+if (settings.mechanism === "landlock") {
+  console.log(`
+REFUSED sandbox-mechanism-unavailable: landlock is not implemented in this revision.
+Confinement is required: choose docker or bwrap.`);
+  process.exit(1);
+}
+if (statusOnly) {
+  console.log(`\nsandbox status: ${settings.mechanism} is the configured mechanism`);
+  process.exit(0);
+}
 
 try {
-  await run("docker", ["info"]);
+  await run(settings.mechanism === "docker" ? (process.env.DPI_SANDBOX_DOCKER ?? "docker") : "bwrap",
+    settings.mechanism === "docker" ? ["info"] : ["--version"]);
 } catch {
-  line(false, "docker is not available");
+  line(false, `${settings.mechanism} is not available`);
   process.exit(1);
 }
 
@@ -65,6 +70,11 @@ const work = join(root, "work");
 await mkdir(work, { recursive: true });
 const secret = join(root, "secret.txt");
 await writeFile(secret, "classified", "utf8");
+const sibling = join(root, "sibling");
+await mkdir(sibling, { recursive: true });
+const siblingSecret = join(sibling, "secret.txt");
+await writeFile(siblingSecret, "sibling-classified", "utf8");
+const auth = join(homedir(), ".pi/agent/auth.json");
 const container = `dpi-sbx-check-${process.pid}`;
 const roots = [work, ...settings.extraRoots];
 let failures = 0;
@@ -73,13 +83,16 @@ const expect = (condition: boolean, text: string) => {
   if (!condition) failures += 1;
 };
 
+let env: SandboxExecutionEnv | undefined;
 try {
-  const env = new SandboxExecutionEnv({
+  env = new SandboxExecutionEnv({
+    mechanism: settings.mechanism,
     cwd: work,
     roots,
-    shellPath: SANDBOX_SHELL,
+    shellPath: sandboxShellPath(settings.mechanism),
     container,
     shellEnv: sandboxShellEnv({
+      mechanism: settings.mechanism,
       container,
       image: settings.image,
       cwd: work,
@@ -95,17 +108,28 @@ try {
   expect((await env.writeFile("inside.txt", "ok", ctx)).ok, "the file tools write inside a root");
   expect(!(await env.readTextFile(secret, ctx)).ok, "the file tools refuse a path outside every root");
 
-  let out = "";
-  const result = await env.exec(
-    `pwd; if cat '${secret}' 2>/dev/null; then echo LEAKED; else echo CONTAINED; fi`,
-    { onOutput: (text) => void (out += text) },
-    ctx,
-  );
-  expect(result.ok, "the shell runs in the container");
-  expect(out.includes(work), "the container sees the working directory");
-  expect(out.includes("CONTAINED") && !out.includes("LEAKED"), "the container cannot read outside its roots");
+  const exec = async (command: string) => {
+    let out = "";
+    const result = await env!.exec(command, { onOutput: (text) => void (out += text) }, ctx);
+    return { ok: result.ok, out };
+  };
+
+  const canary = await exec(`pwd; if cat '${secret}' >/dev/null 2>&1; then echo LEAKED; else echo CONTAINED; fi`);
+  expect(canary.ok, "the shell runs in the sandbox");
+  expect(canary.out.includes(work), "the sandbox sees the working directory");
+  expect(canary.out.includes("CONTAINED") && !canary.out.includes("LEAKED"), "the sandbox cannot read a sibling temp file");
+
+  // Negative proof: the real credential and a sibling directory. stdout is /dev/null, so a broken sandbox
+  // yields `rc=0` but never the file's bytes. stderr is the OS refusal, quoted as-is.
+  const authProbe = await exec(`cat '${auth}' >/dev/null; echo "auth_rc=$?"`);
+  const siblingProbe = await exec(`cat '${siblingSecret}' >/dev/null; echo "sibling_rc=$?"`);
+  expect(authProbe.ok && !authProbe.out.includes("auth_rc=0"), `the sandbox cannot read ${auth}`);
+  expect(siblingProbe.ok && !siblingProbe.out.includes("sibling_rc=0"), "the sandbox cannot read a sibling worktree");
+  line(!authProbe.out.includes("auth_rc=0"), `auth refusal: ${authProbe.out.trim().split("\n").filter((l) => l.includes("cat:") || l.includes("auth_rc=")).join(" | ")}`);
+  line(!siblingProbe.out.includes("sibling_rc=0"), `sibling refusal: ${siblingProbe.out.trim().split("\n").filter((l) => l.includes("cat:") || l.includes("sibling_rc=")).join(" | ")}`);
 } finally {
-  await stopSandbox(container).catch(() => {});
+  if (settings.mechanism === "docker") await stopSandbox(container).catch(() => {});
+  await env?.cleanup(BACKGROUND_CONTEXT).catch(() => {});
   await rm(root, { recursive: true, force: true });
 }
 

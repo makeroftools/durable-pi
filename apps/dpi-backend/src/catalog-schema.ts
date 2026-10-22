@@ -24,6 +24,14 @@ const migrations: Migration[] = [
     if (!columns.some((column) => column.name === "bodyHash"))
       db.exec("ALTER TABLE requests ADD COLUMN bodyHash TEXT");
   },
+  // 3 — the per-session declared scope (`claims.read`/`claims.write` plus additive roots), stored as canonical
+  // JSON. Existing rows keep NULL: they fall back to the session cwd, exactly as before, and the fallback is
+  // recorded in `scope.report/v1` as `cwd-default`.
+  (db) => {
+    const columns = db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
+    if (!columns.some((column) => column.name === "scope"))
+      db.exec("ALTER TABLE sessions ADD COLUMN scope TEXT");
+  },
 ];
 
 /** The schema this build writes. Derived from the step list, so it cannot drift from the migrations. */

@@ -5,11 +5,23 @@ import { networkInterfaces } from "node:os";
 import { loadConfig } from "./config.js";
 import { fetchOpenBaoSecrets, secretFields, type ModelCredentials } from "./secrets.js";
 import { Store } from "./store.js";
+import { ScopeReporter } from "./scope.js";
 import { bearerAuth } from "./auth.js";
 import { errorMiddleware } from "./errors.js";
 import { v1 } from "./routes.js";
 
 const config = loadConfig();
+const reporter = new ScopeReporter(config.dataDir, {
+  mechanism: config.sandbox.mechanism,
+  version: config.sandbox.version,
+  read_roots: config.sandbox.extraRoots,
+  write_roots: [],
+});
+if (config.sandbox.mechanism === "none")
+  reporter.refuse("sandbox-off", `Confinement is required; ${config.sandbox.reason ?? "DPI_SANDBOX is off"}`);
+else if (config.sandbox.mechanism === "landlock")
+  reporter.refuse("sandbox-mechanism-unavailable", "landlock is not implemented in this revision");
+else reporter.report({ source: "process-start" });
 // Resolve the model credential from OpenBao at boot when configured; a failure is fatal, never a silent empty key.
 // The value is passed to the store and the Jev client in memory — it is never placed in `process.env`.
 let secrets: ModelCredentials | undefined;
@@ -24,6 +36,7 @@ const store = await Store.open({
   name: config.name,
   provider: config.provider,
   sandbox: config.sandbox,
+  reporter,
   secrets,
 });
 

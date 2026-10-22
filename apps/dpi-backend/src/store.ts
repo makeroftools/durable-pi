@@ -14,6 +14,7 @@ import type {
   ModelInfo,
   Page,
   SendResult,
+  SessionScope,
   SessionSummary,
   TaskNode,
   TaskOutcome,
@@ -59,8 +60,8 @@ import {
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
-import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { SandboxExecutionEnv, SANDBOX_SHELL, sandboxShellEnv, type SandboxSettings } from "./sandbox.js";
+import { SandboxExecutionEnv, SandboxRefusal, sandboxShellEnv, sandboxShellPath, type SandboxSettings } from "./sandbox.js";
+import { ScopeReporter } from "./scope.js";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createPlayground, Workspace, type SpawnSession } from "./extensions.js";
 import { createJobs, JobRuns, JOB_DEFS, jobDef, resolveJobInput, type Jobs } from "./jobs.js";
@@ -87,6 +88,8 @@ export type SessionRow = {
   id: string;
   name: string;
   cwd: string;
+  /** Canonical JSON of the session's declared scope; NULL means the legacy cwd-only fallback. */
+  scope: string | null;
   dbPath: string;
   createdAt: number;
   model: string;
@@ -98,8 +101,10 @@ export interface StoreOptions {
   startDirs: string[];
   name: string;
   provider: "openrouter" | "faux";
-  /** Per-session execution sandbox. Off when absent, so the host environment is unchanged. */
+  /** Per-session execution sandbox. A `none` mechanism is a refusal at exec time, never a host fallback. */
   sandbox?: SandboxSettings;
+  /** `scope.report/v1` sink; when absent, reports are not written (tests). */
+  reporter?: ScopeReporter;
   /** Model credentials resolved from OpenBao at boot, held in memory and never placed in `process.env`. */
   secrets?: ModelCredentials;
 }
@@ -296,15 +301,29 @@ export class Store {
    */
   private execEnv(row: SessionRow, cwd: string, shellEnv: NodeJS.ProcessEnv) {
     const sandbox = this.options.sandbox;
-    if (!sandbox?.enabled) return new NodeExecutionEnv({ cwd, shellEnv });
+    if (!sandbox || sandbox.mechanism === "none") {
+      const reason = sandbox?.reason ?? "DPI_SANDBOX is off";
+      this.options.reporter?.refuse("sandbox-off", `Confinement is required; ${reason}`, { session_id: row.id });
+      throw new SandboxRefusal("sandbox-off", `Confinement is required; ${reason}`);
+    }
+    if (sandbox.mechanism === "landlock") {
+      this.options.reporter?.refuse("sandbox-mechanism-unavailable", "landlock is not implemented in this revision", {
+        session_id: row.id,
+      });
+      throw new SandboxRefusal("sandbox-mechanism-unavailable", "landlock is not implemented in this revision");
+    }
+    const scope = this.scopeOf(row, cwd);
+    const extra = [...scope.extra, ...sandbox.extraRoots.filter((root) => root !== cwd && !scope.write.includes(root) && !scope.read.includes(root))];
+    const roots = [cwd, ...scope.write.filter((p) => p !== cwd), ...scope.read, ...extra];
     const container = `dpi-sbx-${row.id}`;
-    const roots = [cwd, ...sandbox.extraRoots];
     return new SandboxExecutionEnv({
+      mechanism: sandbox.mechanism,
       cwd,
       roots,
-      shellPath: SANDBOX_SHELL,
+      shellPath: sandboxShellPath(sandbox.mechanism),
       container,
       shellEnv: sandboxShellEnv({
+        mechanism: sandbox.mechanism,
         container,
         image: sandbox.image,
         cwd,
@@ -446,6 +465,52 @@ export class Store {
     return h;
   }
 
+  /** Resolve the declared scope to absolute roots; omitted means the cwd alone (reported as cwd-default). */
+  private async resolveScope(cwd: string, declared: SessionScope | undefined): Promise<{ read: string[]; write: string[]; extra: string[] }> {
+    const abs = async (p: string) => {
+      const expanded = p === "~" ? homedir() : p.startsWith("~/") ? join(homedir(), p.slice(2)) : p;
+      const resolved = resolve(cwd, expanded);
+      try {
+        return await realpath(resolved);
+      } catch {
+        return resolved;
+      }
+    };
+    const list = async (value: unknown, field: string): Promise<string[]> => {
+      if (value === undefined) return [];
+      if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim()))
+        throw invalid(`scope.${field} must be an array of non-empty paths`);
+      return Promise.all(value.map((item: string) => abs(item.trim())));
+    };
+    if (declared === undefined) return { read: [], write: [cwd], extra: [] };
+    const write = await list(declared.write, "write");
+    const read = await list(declared.read, "read");
+    const extra = await list(declared.extra, "extra");
+    if (!write.includes(cwd)) throw invalid("scope.write must include cwd");
+    return {
+      write: [cwd, ...write.filter((p) => p !== cwd)],
+      read: read.filter((p) => p !== cwd && !write.includes(p)),
+      extra: extra.filter((p) => p !== cwd && !write.includes(p) && !read.includes(p)),
+    };
+  }
+
+  /** The stored scope, or the cwd-only fallback for pre-migration rows. */
+  private scopeOf(row: SessionRow, cwd: string): { read: string[]; write: string[]; extra: string[] } {
+    if (!row.scope) return { read: [], write: [cwd], extra: [] };
+    try {
+      const parsed = JSON.parse(row.scope) as { read?: unknown; write?: unknown; extra?: unknown };
+      const take = (value: unknown) => Array.isArray(value) ? value.filter((p): p is string => typeof p === "string") : [];
+      const write = take(parsed.write);
+      return {
+        write: write.includes(cwd) ? write : [cwd, ...write],
+        read: take(parsed.read),
+        extra: take(parsed.extra),
+      };
+    } catch {
+      return { read: [], write: [cwd], extra: [] };
+    }
+  }
+
   /** `spawnKey` records which tool call created the session, in the same transaction as the session row. */
   async create(body: CreateSessionBody, spawnKey?: string): Promise<SessionSummary> {
     if (typeof body?.name !== "string") throw invalid("name is required");
@@ -462,22 +527,31 @@ export class Store {
     const model = this.validateModel(body.model);
     if (body.thinkingLevel !== undefined && !THINKING_LEVELS.includes(body.thinkingLevel))
       throw invalid("Invalid thinking level");
+    const scope = await this.resolveScope(cwd, body.scope);
     const id = randomUUID();
     const row: SessionRow = {
       id,
       name: body.name.trim().slice(0, 100) || "Untitled session",
       cwd,
+      scope: JSON.stringify(scope),
       dbPath: join(this.sessionsDir, id, "agent.sqlite"),
       createdAt: Date.now(),
       model: model.modelId,
       provider: model.provider,
     };
+    this.options.reporter?.report({
+      source: "session-create",
+      session_id: id,
+      declared: body.scope === undefined ? "cwd-default" : "scope",
+      read_roots: [...scope.read, ...scope.extra],
+      write_roots: scope.write,
+    });
     await this.openAgent(row, true, body.thinkingLevel ?? "low");
     this.catalog.exec("BEGIN");
     try {
       this.catalog
-        .prepare("INSERT INTO sessions VALUES(?,?,?,?,?,?,?)")
-        .run(id, row.name, cwd, row.dbPath, row.createdAt, row.model, row.provider);
+        .prepare("INSERT INTO sessions(id,name,cwd,dbPath,createdAt,model,provider,scope) VALUES(?,?,?,?,?,?,?,?)")
+        .run(id, row.name, cwd, row.dbPath, row.createdAt, row.model, row.provider, row.scope);
       if (spawnKey) this.catalog.prepare("INSERT OR REPLACE INTO session_spawns VALUES(?,?)").run(spawnKey, id);
       this.catalog.exec("COMMIT");
     } catch (e) {
