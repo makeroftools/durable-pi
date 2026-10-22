@@ -137,6 +137,7 @@ test("sandbox env runs commands in a sandbox that cannot see outside its roots",
 
 // R4: the real credential and a directory outside the roots, from inside the confined actor. The probe proves
 // those paths are absent from the confined mount namespace; it does not prove that a mounted path was denied.
+// The outside directory is a throwaway under /tmp, not a real sibling under worktrees/.
 // stdout is /dev/null, so a broken sandbox yields `rc=0` but never the bytes. A missing mechanism fails; never skips.
 test("the confined actor cannot see the agent credential or a directory outside its roots", async () => {
   assert.notEqual(settings.mechanism, "none", `sandbox-off: ${settings.reason ?? "no mechanism"}`);

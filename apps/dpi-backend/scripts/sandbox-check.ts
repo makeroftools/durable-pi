@@ -120,8 +120,9 @@ try {
   expect(canary.out.includes("CONTAINED") && !canary.out.includes("LEAKED"), "the sandbox cannot see a path outside its roots");
 
   // Negative proof: the real credential and a directory outside the roots. The probe proves those paths are
-  // absent from the confined mount namespace; it does not prove that a mounted path was denied. stdout is
-  // /dev/null, so a broken sandbox yields `rc=0` but never the file's bytes. stderr is quoted as-is.
+  // absent from the confined mount namespace; it does not prove that a mounted path was denied. The outside
+  // directory is a throwaway under /tmp, not a real sibling under worktrees/. stdout is /dev/null, so a broken
+  // sandbox yields `rc=0` but never the file's bytes. stderr is quoted as-is.
   const authProbe = await exec(`cat '${auth}' >/dev/null; echo "auth_rc=$?"`);
   const outsideProbe = await exec(`cat '${outsideSecret}' >/dev/null; echo "outside_rc=$?"`);
   expect(authProbe.ok && !authProbe.out.includes("auth_rc=0"), `the sandbox cannot see ${auth}`);
